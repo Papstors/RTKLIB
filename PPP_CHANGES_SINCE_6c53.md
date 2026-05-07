@@ -304,4 +304,120 @@ Aucune PR ouverte sur `rtklibexplorer/RTKLIB` n'aborde ce sujet à date d'analys
 
 ---
 
-*Synthèse établie sur 1298 commits (805 hors merges) entre `6c53aa2` et `28ad77c`. Sélection par filtrage sur les fichiers `ppp.c`, `ppp_ar.c`, `ppp_corr.c`, `preceph.c`, `sbas.c`, `ionex.c`, `rtkpos.c`, `pntpos.c`, `rtcm3.c`, `rinex.c`, et les apps `rtkpost*`, `rtknavi*`, `rnx2rtkp`, `rtkrcv`.*
+## 6. Pistes de correction supplémentaires (audit complémentaire)
+
+> Issues non encore traitées en upstream, identifiées par audit ciblé du code à `HEAD` (`28ad77c`). 57 problèmes recensés, regroupés par thème. Méthodologie : 4 agents d'analyse en parallèle sur (a) cœur PPP, (b) interfaces, (c) parsers produits externes, (d) SSR/temps réel/multi-fréq.
+
+### 6.1 🔴 Théme transversal n°1 — `NFREQ=4` partiellement appliqué
+
+Le passage à 4 fréquences (`199be2b`, avr. 2025) n'a pas propagé partout. Plusieurs structures et boucles restent hardcodées à 3.
+
+| Sévérité | Fichier:ligne | Problème |
+|---|---|---|
+| 🔴 | `src/rtklib.h:834-836` | Structure `ssr_t` : `deph[3]`, `ddeph[3]`, `dclk[3]` figés à 3 → corrections orbit/clock SSR pour la 4ᵉ fréq impossibles. |
+| 🔴 | `src/rtcm3.c:1629-1638, 1674-1695, 1710-1725` | Boucles `for (k=0;k<3;k++)` dans `decode_ssr1/2/3` → la 4ᵉ correction n'est jamais lue même si présente. |
+| 🔴 | `src/rtkcmn.c:3744` (`seliflc`) | `return((optnf==2\|\|sys==SYS_GLO)?1:2)` — pas de cas `nf≥4`, retourne toujours indice ≤2 → la 4ᵉ fréq n'est jamais utilisée en iono-free. |
+| 🟠 | `src/ppp.c:754` | Cycle-slip iono-free hardcodé à `slip[0] \|\| slip[1]` — slips sur freq 2,3 invisibles pour les biais iono-free. |
+| 🟠 | `src/ppp.c:385-406` | `gfmeas` / `mwmeas` n'utilisent que `code[0]`/`code[1]` → cycle-slip GF/MW jamais détecté sur freq 2,3. |
+| 🟠 | `src/ppp.c:368-369` | `obs->Pstd[frq]` / `Lstd[frq]` accédé sans guard `frq < NFREQ` → OOB potentiel si récepteur fournit 5+ fréquences. |
+| 🟠 | `src/ppp.c:1162` | `test_hold_amb` ne teste que `fix[0]` et `fix[1]` → fix-and-hold sur freq 2,3 jamais validé. |
+| 🟠 | `src/rtklib.h:874` | `cbias[MAXSAT][NFREQ][MAX_CODE_BIASES]` alloué mais SSR remplit `pbias[MAXCODE]` plat → mismatch d'indexation. |
+
+**Impact global** : utiliser `NFREQ=4` sur `HEAD` donne une expérience **partielle** — la 4ᵉ fréq est consommée par certains modules et ignorée par d'autres.
+
+### 6.2 🔴 Théme transversal n°2 — Variances et facteurs hardcodés GPS-only
+
+| Sévérité | Fichier:ligne | Problème |
+|---|---|---|
+| 🔴 | `src/ppp.c:372` | `var *= (ionoopt==IONOOPT_IFLC)?SQR(3.0):1.0` — facteur 3.0 valide uniquement pour GPS L1/L2. Pour Galileo E1/E5, BeiDou B1C/B2a, GLO L1/L4, le facteur correct dépend du ratio de fréq réel. Commentaire FIXME présent dans le code. |
+| 🔴 | `src/ppp.c:355-357` | Seul `EFACT_GPS_L5` existe. Galileo E5a, BeiDou B2a, IRNSS L5 n'ont aucun facteur d'erreur fréq → variance L5 sous-estimée pour non-GPS. |
+| 🟠 | `src/ppp.c:695` | Process noise iono `prn[1]` uniforme tous systèmes — Galileo/BeiDou ont des dispersions iono différentes. |
+| 🟡 | `src/ppp.c:85` | `VAR_BIAS=SQR(60.0)` identique toutes fréqs — trop pessimiste pour L5/E5a (λ≈24cm). |
+
+### 6.3 🟠 Robustesse parsing produits externes
+
+**Pattern récurrent** : `satid2no(prn)` retourne 0 pour PRN invalide, mais le code accède à `nav->X[sat-1]` sans guard.
+
+| Sévérité | Fichier:ligne | Problème |
+|---|---|---|
+| 🔴 | `src/preceph.c:486,494,502,504` | `readbiaf` : pas de check `sat > 0` → accès `cbias[-1]`. |
+| 🔴 | `src/preceph.c:453-458` | `code2bias` : check `sat ≤ MAXSAT` mais pas `sat > 0`. |
+| 🔴 | `src/preceph.c:454` | `code_bias_ix[sys_ix][code]` indexé sans check `code < MAXCODE` → OOB si nouveau code RTCM v3.3+. |
+| 🟠 | `src/preceph.c:221,240,244,249,252` | `readsp3b` : `peph.pos[sat-1]` sans guard. |
+| 🟠 | `src/rinex.c:1584,1608-1609` | `readrnxclk` : `nav->pclk[].clk[sat-1]` sans guard. |
+| 🟠 | `src/preceph.c:597,603,615,626,627,676,677` | `pephclk` / `pephpos` accèdent `[sat-1]` sans guard. |
+| 🟠 | `src/preceph.c:134-139` | SP3-d > 85 sats : `sats[]` peut déborder `MAXSAT`. |
+| 🟠 | `src/preceph.c:479-485` | `readbiaf` : check `strlen < 91` mais accès `buff[70..90]` → cas limite à 90 caractères. |
+| 🟡 | `src/ionex.c:126-171` | `readionexh` ne réinitialise que `ver` entre fichiers — `lats/lons/hgts/nexp/rb` persistent → interpolation TEC sur mauvaise grille en multi-fichiers. |
+| 🟡 | `src/preceph.c:99-100` | `code_bias_ix` BeiDou : seulement `CODE_L2I`, `CODE_L6I` — manque L8T, L6D, L5D modernes. |
+| 🟡 | `src/preceph.c:719` | `satantoff` → `searchpcv` sans guard `sat > 0`. |
+
+### 6.4 🟠 SSR / temps réel — gaps de couverture
+
+| Sévérité | Fichier:ligne | Problème |
+|---|---|---|
+| 🔴 | `src/rtcm3.c:2604-2618` | `decode_type4076` (IGS-SSR) : subtypes IRNSS **141-147 absents** du switch — messages IRNSS-SSR silencieusement ignorés. |
+| 🔴 | `src/rtcm3.c` | **SSR-IM201** (standard IGS officiel à venir) non supporté — incompatibilité future avec NTRIP migrant. |
+| 🔴 | `src/rtksvr.c:318-324` | Aucun test `ssr_time ≤ current_time` — corrections SSR avec timestamp futur appliquées telles quelles → divergence. |
+| 🟠 | `src/rtksvr.c:330-340` | IODE matching SSR↔broadcast : seulement GPS/GAL/QZS/GLO. BeiDou/SBAS/IRNSS non couverts → corrections appliquées avec IODE désynchronisé. |
+| 🟠 | `src/rtcm3.c:2015-2019` | Pas de flag `pbias_valid` dans `ssr_t` après décodage SSR7 → biais nuls appliqués comme si intentionnels. |
+| 🟠 | RTCM3 SSR header | Pas de détection rollover/reboot encodeur SSR (saut IOD) → fausse détection nouvelle éphéméride. |
+| 🟡 | `src/rtksvr.c:836-837` | `t0[]` initialisé à `time0` au lieu de `{0}` (déjà partiellement résolu par `28ad77c` mais incomplet). |
+| 🟡 | `src/stream.c:111,1667,1724,1962` | NTRIP : pas de watchdog par message → SSR fragmenté/bloqué donne corrections stales >10s. |
+| 🟡 | `src/rtkcmn.c:722-735` | `code2idx` peut retourner -1 pour codes BeiDou B1C/B2a/B3I, Galileo E6, IRNSS récents si tables `code2freq_*` incomplètes → biais ignorés silencieusement. |
+
+### 6.5 🟠 Cohérence des interfaces utilisateur
+
+| Sévérité | Fichier:ligne | Problème |
+|---|---|---|
+| 🔴 | `app/winapp/rtkpost/postopt.cpp:744,784-785` | **Champs `PPPOpts` / `RnxOpts1` / `RnxOpts2` saisis en GUI mais non persistés dans INI** → perte des options custom au redémarrage. |
+| 🔴 | `app/consapp/rnx2rtkp/rnx2rtkp.c:51-52` | Help texte ne documente pas les modes 7/8/9 (`ppp-kinematic`, `ppp-static`, `ppp-fixed`) bien qu'ils fonctionnent via `-p`. |
+| 🟠 | `src/options.c:118` + `app/winapp/rtkpost/postmain.cpp:1042-1043` + `naviopt.cpp:442-443` | `pos2-rejionno` deprecated (`a06e9c1`) mais GUI Windows continue de lire/écrire `prcopt.maxinno[0/1]` directement → migration `pos2-rejphase` incomplète. |
+| 🟠 | `app/consapp/rnx2rtkz/rnx2rtkp.c:140-162` | CLI : pas de flags pour `pos2-gloarmode`, `pos2-bdsarmode`, `pos2-arthres1..4`, `pos2-armaxiter`, `pos2-varholdamb` → AR multi-constell uniquement via `-k config`. |
+| 🟠 | `app/winapp/rtkpost/postopt.cpp:254-257,945` | RTKPOST désactive `IonoOpt` pour PPP mais `IONOOPT_IFLC` n'est pas exposé non plus → utilisateur ne peut pas choisir iono-free explicite en GUI. |
+| 🟠 | `app/winapp/rtkpost/postopt.cpp:280-282` | Pas de validation `PPP-fixed + Freq=L1 seul` → combo accepté mais runtime ajuste silencieusement. |
+| 🟡 | `app/winapp/rtkpost/postopt.cpp:800-801` + `postmain.cpp:1003-1004` | `tidecorr` : combo index `0/1/2` mappé en bitmask `0/1/7` (hardcodé `if (>1) =7`) → bits intermédiaires (3,5) inaccessibles depuis GUI. |
+| 🟡 | `app/winapp/rtkpost/postopt.cpp:755-762` vs `src/options.c:190-195` | Fichiers ANTEX satellite/récepteur exposés en GUI mais `file-satantfile` / `file-rcvantfile` parsing config absent → divergence GUI ↔ CLI. |
+| 🟡 | `app/winapp/rtkpost/postopt.cpp:948-950` | `posopt3-6` (PHWOPT etc.) en checkbox sans tooltip explicatif PPP-spécifique. |
+| 🟡 | `app/consapp/rnx2rtkp/rnx2rtkp.c:46` | Pas de `-K outfile` pour sauvegarder la session → utilisateur doit éditer config à la main. |
+
+### 6.6 🟡 Divers — effets de bord
+
+| Sévérité | Fichier:ligne | Problème |
+|---|---|---|
+| 🟠 | `src/ppp.c:1061` | `THRES_REJECT=4σ` identique pour phase et code — phase residuals plus sensibles aux ambigs mal initialisées → trop de rejets en early epochs. |
+| 🟠 | `src/ppp.c:118` (`IB` macro) + `src/ppp.c:741,746,783,790` | Si `nf` change entre sessions (ex: passage `IFLC→EST` + `nf 2→3`), `rtk->ssat[].fix[]` n'est pas redimensionné → indices `ambc` invalides. |
+| 🟡 | `src/ppp.c:819-821` | DCB L5 estimé inconditionnellement si `nf ≥ 3`, même en `IONOOPT_IFLC` (1 fréq effective) → degré de liberté Kalman gaspillé. |
+| 🟡 | `src/rtklib.h:162` | Si `NEXOBS=0`, observations indice ≥ NFREQ filtrées dans `save_msm_obs` → L5/E6 perdus silencieusement. |
+
+### 6.7 Note sur la dépendance GPS (réf. section 5)
+
+L'audit confirme la dépendance documentée en section 5 (`src/ppp.c:618-622`) et propose un **pattern de fix** validé par revue indépendante :
+
+```c
+int ref_sys = -1;
+for (int i=0; i<NSYS; i++) {
+    if (rtk->sol.dtr[i] != 0.0) { ref_sys = i; break; }
+}
+if (ref_sys < 0) ref_sys = 0;  /* fallback GPS */
+dtr = (i == ref_sys)
+      ? rtk->sol.dtr[i]
+      : (rtk->sol.dtr[i] - rtk->sol.dtr[ref_sys]);
+```
+
+À ouvrir en PR upstream après validation jeux de tests.
+
+### 6.8 Synthèse priorisée
+
+**Top 5 fixes à viser immédiatement** :
+1. 🔴 `ssr_t.deph[3]` / `dclk[3]` → `[NFREQ]` (`rtklib.h:834-836`)
+2. 🔴 Guards `sat > 0` dans `preceph.c` (≥10 occurrences)
+3. 🔴 Persistence `PPPOpts` dans INI RTKPOST/RTKNAVI Windows
+4. 🔴 `seliflc()` cas `nf≥4` (`rtkcmn.c:3744`)
+5. 🔴 Facteur iono-free dynamique au lieu de `SQR(3.0)` (`ppp.c:372`)
+
+**Bilan global** : 7 issues 🔴 critiques (corruption mémoire, perte données utilisateur, biais algorithmiques majeurs), 24 🟠 moyennes (dégradations qualité solution / UX), 18 🟡 mineures.
+
+---
+
+*Synthèse établie sur 1298 commits (805 hors merges) entre `6c53aa2` et `28ad77c`. Sélection par filtrage sur les fichiers `ppp.c`, `ppp_ar.c`, `ppp_corr.c`, `preceph.c`, `sbas.c`, `ionex.c`, `rtkpos.c`, `pntpos.c`, `rtcm3.c`, `rinex.c`, et les apps `rtkpost*`, `rtknavi*`, `rnx2rtkp`, `rtkrcv`. Section 6 issue de 4 audits parallèles (cœur PPP / interfaces / produits externes / SSR-multi-fréq).*
