@@ -231,4 +231,77 @@
 
 ---
 
+## 5. ⚠️ Dépendance résiduelle à GPS (non corrigée)
+
+> **TL;DR** : Oui, la dépendance structurelle à GPS héritée de l'origine de RTKLIB **est toujours présente** sur `HEAD` (`28ad77c`). Elle a été partiellement atténuée mais pas levée. Si GPS manque (urban canyon, scénarios multi-constell sans GPS), le PPP peut être instable.
+
+### 5.1 Architecture concernée (inchangée depuis 6c53)
+
+L'horloge récepteur PPP reste référencée à GPS dans `src/ppp.c:1138-1141` :
+
+```c
+rtk->sol.dtr[0]=rtk->x[IC(0,opt)]/CLIGHT;                       /* GPS */
+rtk->sol.dtr[1]=(rtk->x[IC(1,opt)]-rtk->x[IC(0,opt)])/CLIGHT;   /* GLO-GPS */
+rtk->sol.dtr[2]=(rtk->x[IC(2,opt)]-rtk->x[IC(0,opt)])/CLIGHT;   /* GAL-GPS */
+rtk->sol.dtr[3]=(rtk->x[IC(3,opt)]-rtk->x[IC(0,opt)])/CLIGHT;   /* BDS-GPS */
+```
+
+À chaque époque, `udclk_ppp` (`src/ppp.c:606-624`) ré-initialise les états horloge en **bruit blanc** depuis le SPP de `pntpos` :
+
+```c
+for (i=0;i<NSYS;i++) {
+    if (rtk->opt.sateph==EPHOPT_PREC) {
+        /* time of prec ephemeris is based gpst */
+        /* neglect receiver inter-system bias  */
+        dtr=rtk->sol.dtr[0];   // <-- tous les systèmes prennent dtr[0] (GPS)
+    } else {
+        dtr=i==0?rtk->sol.dtr[0]:rtk->sol.dtr[0]+rtk->sol.dtr[i];
+    }
+    initx(rtk,CLIGHT*dtr,VAR_CLK,IC(i,&rtk->opt));
+}
+```
+
+### 5.2 Mécanisme de défaillance sans GPS
+
+Dans `pntpos` (`src/pntpos.c:344-351`), si aucun satellite GPS/QZS n'est observé, `mask[0]=0` et la contrainte de rang force `x[3]=0`. L'horloge récepteur réelle est alors **absorbée dans les biais inter-systèmes** `x[4]/x[5]/x[6]/x[7]`.
+
+Conséquence en cascade :
+1. `sol.dtr[0] ≈ 0` (fictif).
+2. `udclk_ppp` ré-initialise les états horloge à 0 (mode `EPHOPT_PREC`) ou à des valeurs incohérentes (mode broadcast).
+3. **Innovations énormes** au premier filtrage → convergence dégradée, voire divergence en kinematic.
+
+### 5.3 Ce qui a été partiellement atténué depuis 6c53
+
+| Commit | Date | Effet |
+|---|---|---|
+| `351bf2d` | 2024-02 | `pntpos` : QZS a maintenant son propre offset via le define `QZSDT`. Plus poolé avec GPS. **Sans GPS mais avec QZS observé**, `mask[0]` reste à 1 → `dtr[0]` cohérent. |
+| `78a5892` | 2024 | Allocations corrigées quand `QZSDT` est activé. |
+| `fc5075e` | 2024 | `pntpos rescode()` : correction du calcul de variance par fréquence. |
+| `1ff4727` | 2024-12 | Unités m↔s corrigées sur le clock bias Kalman — n'élimine pas la dépendance, mais évite la corruption silencieuse des états horloge si la position initiale ne converge pas. |
+| `b4b8d83` | 2025-05 | `rtkpos` : test de position initiale assoupli (norme < ½ rayon Terre suffit comme "init"). |
+| `2e1ddfa` | 2026-02 | PPP **sans broadcast** quand des produits précis sont fournis — réduit certaines dépendances aux nav GPS, mais pas la référence horloge. |
+
+### 5.4 Ce qui reste à corriger
+
+1. **Mode `EPHOPT_PREC`** : le commentaire `/* neglect receiver inter-system bias */` est **explicite** — les ISB du récepteur sont volontairement ignorés, tout est calé sur `dtr[0]`. Sans GPS, instable.
+2. **Pas de sélection dynamique** d'un système de référence alternatif si GPS manque.
+3. **`FREQL1`** reste la fréquence de référence pour les facteurs de scaling iono dans `pntpos.c:323`, `rtkpos.c:1297-1298`, `ppp.c:684`/`995`. Mais `FREQL1` (1.57542 GHz) est partagée avec Galileo E1 et BeiDou B1C → **ce n'est pas une dépendance à recevoir GPS**, juste une constante de ratio. ✅ Cette partie est OK.
+
+### 5.5 Recommandations pratiques
+
+- **PPP sans GPS garanti** : préférer `EPHOPT_BRDC` ou `EPHOPT_BRDC+SSR` à `EPHOPT_PREC`. La branche `else` de `udclk_ppp` est plus robuste car elle utilise `dtr[0]+dtr[i]` qui se compense partiellement même si `dtr[0]=0`.
+- **PPP urban canyon** : prévoir une logique applicative qui rejette les époques sans GPS pendant la convergence initiale (~10-30 premières époques), ou ré-initialise le filtre.
+- **Activer `QZSDT`** (déjà actif sur `HEAD`) si tu opères en zone Asie-Pacifique : QZSS peut alors servir de référence quand GPS dégrade.
+- **Surveiller** la trace `udclk_ppp` (level 3) et les innovations initiales : un saut > 1 ms entre époques avec et sans GPS révèle le problème.
+
+### 5.6 Patch potentiel (à proposer en PR upstream)
+
+Une vraie correction nécessiterait de réécrire `udclk_ppp` pour **élire dynamiquement** un système de référence (celui avec le plus d'observations sur l'époque), et de propager cohérement les états horloge entre époques au lieu de les ré-initialiser en bruit blanc depuis SPP. Cela impliquerait aussi :
+- modifier `pntpos` pour que `dtr[0]` reflète l'horloge absolue du récepteur, peu importe le système de référence interne ;
+- ou, plus simple, inverser le rôle quand GPS est absent : utiliser le premier système observé comme ancrage et stocker les `dtr[i]` comme offsets relatifs à lui.
+
+Aucune PR ouverte sur `rtklibexplorer/RTKLIB` n'aborde ce sujet à date d'analyse (mai 2026).
+
+---
+
 *Synthèse établie sur 1298 commits (805 hors merges) entre `6c53aa2` et `28ad77c`. Sélection par filtrage sur les fichiers `ppp.c`, `ppp_ar.c`, `ppp_corr.c`, `preceph.c`, `sbas.c`, `ionex.c`, `rtkpos.c`, `pntpos.c`, `rtcm3.c`, `rinex.c`, et les apps `rtkpost*`, `rtknavi*`, `rnx2rtkp`, `rtkrcv`.*
