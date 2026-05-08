@@ -436,4 +436,108 @@ dtr = (i == ref_sys)
 
 ---
 
-*Synthèse établie sur 1298 commits (805 hors merges) entre `6c53aa2` et `28ad77c`. Sélection par filtrage sur les fichiers `ppp.c`, `ppp_ar.c`, `ppp_corr.c`, `preceph.c`, `sbas.c`, `ionex.c`, `rtkpos.c`, `pntpos.c`, `rtcm3.c`, `rinex.c`, et les apps `rtkpost*`, `rtknavi*`, `rnx2rtkp`, `rtkrcv`. Section 6 issue de 4 audits parallèles (cœur PPP / interfaces / produits externes / SSR-multi-fréq).*
+## 7. Sprint 2 semaines — cherry-pick sur 6c53
+
+> Stratégie minimaliste : on reste sur 6c53 (testé en prod), on n'apporte que des patches isolés, individuellement défendables, à risque de régression bas. Les fixes plus larges (`.BIA`, OSB, `NFREQ=4`, cycle-slip Doppler, refactor DCB/OSB) sont écartés et reportés sur un sprint 2 ultérieur.
+
+### 7.1 Liste des 9 patches retenus
+
+| # | Prio | Commit | Fichier(s) | LOC | Ce qu'on corrige | Justification équipe |
+|---|---|---|---|---|---|---|
+| 1 | 🔴 | `1ff4727` | `rtkpos.c` | ~3 | Conversion m↔s manquante sur Kalman clock bias states | *"On corrige juste une unité oubliée — corruption silencieuse de la solution si l'init position ne converge pas."* |
+| 2 | 🔴 | `b99d11b` | `ppp.c` | ~10 | `varerr()` PPP iono-free pour systèmes non L1/L2 | *"Sans ça, variance fausse pour Galileo E1/E5 → divergence en multi-constell."* |
+| 3 | 🔴 | `1a66490` | `ppp.c` | ~5 | Out-of-bounds dans `ppp.c` (PR M. Valgur, mergée upstream) | *"Bug mémoire détecté par contrib externe, fix accepté en upstream."* |
+| 4 | 🟠 | `efe4e67` | `rtkpos.c` | ~5 | Correction iono GLONASS dual-fréq (M. Valgur) | *"Erreur d'unité dans le calcul iono GLONASS."* |
+| 5 | 🟠 | `b49ce01` | `rtkpos.c` | ~10 | AR cassée si GLO=off + `GLO_AR=fix-and-hold` (RTK) | *"Configuration GLO_AR ignorée silencieusement."* |
+| 6 | 🟠 | `5cfa31b` | `rinex.c` | ~3 | Roundoff timestamps RINEX (entrées 60s parasites avec `-TADJ`) | *"Évite des duplications d'époques en sortie RINEX."* |
+| 7 | 🟠 | `f1a7d2f` | `rtkpos.c` | ~5 | AR instantanée — reset excessif lock count (RTK) | *"Optimisation conservative de la logique de reset."* |
+| 8 | 🟡 | `269c2d5` | `rtcm3.c` | ~15 | Resync RTCM3 après message invalide | *"Évite la perte de messages SSR si données mixées."* |
+| 9 | 🟡 | `28ad77c` (partiel) | `app/winapp/rtknavi/navimain.cpp` | ~3 | Reproductibilité rejeux `.tag` — **décommenter** la ligne `rtksvrinit(&rtksvr)` au démarrage de RTKNAVI | *"Garantit qu'un rejeu du même `.tag` produit le même résultat. Critique pour la non-régression."* ⚠️ on prend le `rtksvrinit` non-commenté (différence avec upstream qui le laisse commenté). |
+
+**Total** : ~60 lignes de code touchées, sur 5 fichiers source distincts.
+
+**EXCLUS du sprint** (à argumenter si l'équipe demande pourquoi ces correctifs majeurs ne sont pas pris) :
+- ❌ `c0138bf` support `.BIA` — gros feature, ~200 lignes + suite de fixes
+- ❌ `d574080` refonte DCB/OSB — refactor tardif, propres bugs
+- ❌ `199be2b` `NFREQ=3→4` — propage partout
+- ❌ `c535238` cycle-slip Doppler — gros feature, change le comportement
+- ❌ Tout patch GUI (sauf #9 qui est trivial)
+- ❌ `2e1ddfa` PPP sans broadcast — feature récente (fév. 2026), risque immature
+
+### 7.2 Calendrier 2 semaines
+
+```
+S1.J1   Geler 6c53 prod • capturer .pos référence sur 5-10 logs prod
+        diversifiés (par mode, environnement, récepteur)
+        Métriques baseline : RMS H/V, %fix, TTFF, %obs rejet
+S1.J2   Vérifier `git apply` propre des 9 patches sur 6c53
+        Tests unitaires si possibles sur fixes 1-3 (les plus simples)
+S1.J3   Appliquer patches 1→9 dans l'ordre, build propre à chaque étape
+        Un commit isolé par patch (rollback granulaire)
+S1.J4   Smoke par patch : 1 dataset rapide à chaque étape
+        Toute divergence inattendue → on isole le patch
+S1.J5   Run complet A/B (6c53 vs 6c53+patches) sur les 5-10 datasets
+
+S2.J6   Triage Δscore (cf. §7.3) — investiguer toute dégradation > seuil
+S2.J7   Bisect inter-patch en cas de régression isolée
+S2.J8   Validation des fixes ciblés : reproduire scénarios déclencheurs
+        (ex: forcer init position non-convergente pour le fix #1,
+        rejouer 2× le même .tag pour valider #9)
+S2.J9   Doc : 1 page par patch (hash upstream, diff résumé, dataset
+        témoin, métrique avant/après)
+S2.J10  Review équipe • décision go/no-go par patch
+        (potentiellement on garde 7-8/9 si certains controversés)
+S2.J11  Canary 1 instance pendant 24-48h
+S2.J12  Monitoring renforcé sur le canary
+S2.J13  Décision deploy progressif
+S2.J14  Buffer • write-up • rétrospective
+```
+
+### 7.3 Critère de non-régression — `Δscore`
+
+Pour chaque dataset on calcule un score composite :
+
+```
+Δscore = w1 · (RMS_H_after − RMS_H_before) / RMS_H_before
+       + w2 · (%fix_before − %fix_after) / 100
+       + w3 · (TTFF_after − TTFF_before) / TTFF_before
+```
+avec `w1=0.5`, `w2=0.3`, `w3=0.2`.
+
+**Critère pass** :
+- moyenne `Δscore < 0.02` (2% d'amélioration globale) **ET**
+- aucun dataset individuel ne dégrade de plus de 5% **ET**
+- patch #9 validé par un rejeu identique 2× (différence binaire `.pos` = 0)
+
+L'objectif n'est **pas la perfection** mais : *"on prouve que la moyenne s'améliore et qu'aucun dataset ne casse."*
+
+### 7.4 Risques résiduels à signaler en kick-off
+
+1. **Dépendance GPS structurelle non corrigée** (cf. section 5) — à planifier en sprint dédié, gros refactor `udclk_ppp` + `pntpos`.
+2. **PPP-AR reste un no-op** (cf. section 1.8 — `ppp_ar.c` stub vide depuis 2016). Si vous comptez sur PPP-fixed, c'est en réalité PPP-kinematic. Sprint suivant : importer une implémentation tierce (rtklib-py partielle, PPP-Wizard).
+3. **Pas de support produits IGS modernes** (`.BIA`, OSB absolus) — sprint 2 obligatoire pour exploiter les flux SSR récents.
+4. **`NFREQ=3` figé** — pas de gain L5 sur récepteurs récents (F9P firmware moderne, X20). Sprint 2.
+5. **Rejeux `.tag` Qt** non couverts (le patch #9 ne touche que la version Embarcadero/Windows). Si vous utilisez rtknavi-qt en prod, le bug d'inversion (`68a355b`) reste à porter.
+
+### 7.5 Brief équipe — talking points
+
+> **Contexte** : on est sur 6c53 (sept. 2021), validé en prod. 4½ ans de fixes upstream à intégrer mais on ne veut pas tout réavaler en bloc.
+>
+> **Approche** : sprint chirurgical de 9 patches isolés (~60 LOC totales), ciblant les bugs critiques **sans** changement de comportement majeur. Aucun nouveau feature, aucun refactor.
+>
+> **Garantie** : chaque patch est commit-isolé → rollback granulaire en 1 minute. Validation A/B sur logs production existants. Critère : moyenne ≥ baseline et aucun dataset ne casse.
+>
+> **Hors-périmètre explicite** : support `.BIA`, OSB, `NFREQ=4`, PPP-AR, refonte DCB/OSB → sprint 2 (planifié séparément, après ce premier passage de fiabilisation).
+>
+> **Effort équivalent** : ~10 j/h (1 dev plein), 4-5 j/h validation (revue datasets + canary), ~2 j/h doc & rétro.
+
+### 7.6 Outillage à préparer (J0)
+
+- Script harness : `compare_pos.py` (input : `pos_baseline/*.pos`, `pos_candidate/*.pos` ; output : table Δscore par dataset + verdict pass/fail)
+- Snapshot des 5-10 datasets de référence + leurs `.pos` baseline figés (avant tout patch)
+- Branche `sprint-1-cherrypicks` à partir du tag de prod actuel
+- Procédure rollback documentée (revert d'un commit = revert d'un patch)
+
+---
+
+*Synthèse établie sur 1298 commits (805 hors merges) entre `6c53aa2` et `28ad77c`. Sélection par filtrage sur les fichiers `ppp.c`, `ppp_ar.c`, `ppp_corr.c`, `preceph.c`, `sbas.c`, `ionex.c`, `rtkpos.c`, `pntpos.c`, `rtcm3.c`, `rinex.c`, et les apps `rtkpost*`, `rtknavi*`, `rnx2rtkp`, `rtkrcv`. Section 6 issue de 4 audits parallèles (cœur PPP / interfaces / produits externes / SSR-multi-fréq). Section 7 = plan d'action sprint.*
