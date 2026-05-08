@@ -161,59 +161,41 @@
 
 ---
 
-## 3. Interfaces utilisateur (impact PPP)
+## 3. Interfaces CLI (rnx2rtkp / rtkrcv)
 
-### 3.1 RTKPOST (Embarcadero / Windows)
+> Sections RTKPOST / RTKNAVI / RTKNAVI-Qt / Qt apps **retirées** : périmètre projet = ligne de commande uniquement.
+
+### 3.1 RNX2RTKP (CLI post-process)
 | Commit | Date | Description |
 |---|---|---|
-| `4ee13e0` | 2025-04-24 | Typo "Broadcast+SSR APC" dans l'array `ephopt`. |
-| `be834d7` | 2025-04-24 | Suppression d'une assignation dupliquée pour `TROPOPT_ESTG`. |
-| `87e2161` | 2025-04-24 | Retrait du STEC model non supporté. |
-| `6a6271e` | 2025-04-24 | Activation `IONOOPT_IFLC` / `IONOOPT_EST` corrigée. |
-| `df40d50` | 2025-04-11 | Dropbox de sélection de fréquences cohérent avec la table de fréquences. |
-| `3538942` | 2025-04-11 | Renommage BeiDou-3 ACE-BOC pour cohérence avec Galileo Alt-BOC. |
-| `cef68a0` | 2025-06-18 | Taille de la box "SNR mask" corrigée. |
-| `35b6fee` | 2024-11-23 | `outprcopts` : émet les fréquences et l'option iono pour les modes PPP. |
-| `bf2b5d1` | 2023-12-13 | Reconnaissance des extensions `*O.RNX` (obs) et `*N.RNX` (nav). |
-| `4509b10` | 2025-04-22 | Label / tooltip de l'AR. |
-| `91193c6` | 2021-11-04 | Ajout option ratio d'erreur L5. |
-
-### 3.2 RTKNAVI / RTKNAVI-Qt (temps réel)
-| Commit | Date | Description |
-|---|---|---|
-| `28ad77c` | 2026-05-01 | Reset de la structure `rtksvr` au démarrage (commenté) → reproductibilité fichier. |
-| `da1f9fa` | 2025-04-28 | Cleanup GUI pour BeiDou + activation/désactivation des options selon RTK vs PPP. |
-| `7856c17` | 2025-04-28 | Active la sortie des options de traitement aussi pour RtkNavi. |
-| `677261d` | 2023-09-26 | Bug code-bias variables corrigé. |
-| `93bac73` | 2025-05-24 | Label corrigé dans RTKNAVI. |
-| `20aa561` | 2024-06-04 | Qt monitor : guard nav vide, largeurs, RTCM SSR. |
-| `770e6f4` | 2024-04-XX | rtknavi-qt : changement de fréquence dans SNR / sky plots. |
-
-### 3.3 RNX2RTKP (CLI post-process)
-| Commit | Date | Description |
-|---|---|---|
-| `4b519f3` | 2023-05-24 | Option `-bl` baseline en CLI + skip des estimées initiales en standard precision. |
-| `6bb4ab2` | 2023-12-07 | Bug option `-sys` corrigé + maj manuel. |
+| `4b519f3` | 2023-05-24 | Option `-bl` baseline en CLI + skip des estimées initiales en standard precision (gain perf rnx2rtkp). |
+| `6bb4ab2` | 2023-12-07 | **Bug option `-sys`** corrigé + maj manuel. |
 | `c4514fe` | 2023-10-10 | Options CLI start / end time. |
 | `d1ab09e` | 2023-10-10 | Fix du paramétrage du fichier de sortie en CLI. |
 | `343c245` | 2023-10-10 | Ne vérifie le suffixe de sortie qu'en cas d'extension invalide. |
-| `ca3befa` | 2025-XX-XX | `rnx2rtkp` : par défaut, navsys inclut Galileo et BDS. |
-| `72dca37` | 2025-XX-XX | BDS ajouté aux systèmes par défaut. |
+| `ca3befa` | 2025-XX | `rnx2rtkp` : par défaut, navsys inclut Galileo et BDS. |
+| `72dca37` | 2025-XX | BDS ajouté aux systèmes par défaut. |
+| `93fdbcd` | 2023-09-21 | gfortran lib dans makefile rnx2rtkp pour gcc (gain perf). |
+| `423ecd2` | 2025-05-21 | Options de format d'entrée corrigées + ajout `CLK`. |
 
-### 3.4 RTKRCV (console temps réel)
+### 3.2 RTKRCV (console temps réel — y compris rejeu `.tag`)
 | Commit | Date | Description |
 |---|---|---|
-| `157919a` | 2025-07-22 | Ajout du mode `ppp-fixed` à la commande `mode`. |
+| `15445ce` | 2025-05-17 | **Sélection auto antenne + position en mode statique.** |
+| `569197d` | 2024-11-11 | `prstatus` rempli pour 5 à 7 fréquences — **nécessaire avec NFREQ=4** sinon `.stat` tronqué. |
+| `9c9ec53` | 2024-07-31 | Rework des position options — vérifier compat avec config rcv existante. |
+| `9f1f9ac` | 2024-08-06 | Support des receiver options dans rtkrcv. |
+| `92046a8` | 2024-05-17 | Stats out streams respectent désormais `solopt.sstat` level. |
+| `e854997` | 2025-02-03 | Commandes `mark` et `mode` (logs marqueurs). |
+| `c2ace2f` | 2025-01-08 | Format unicore en option. |
+| `493d80e` | 2024-06-16 | `--detach` from console. |
+| `02ec964` | 2024-06-05 | `--version` flag. |
+| `7c926a0` / `36e8924` | 2024-05 | Shell command execution → option de compilation (par défaut désactivée). |
 | `4b519f3` | 2023-05-24 | Option pour lancer RTKRCV sans console. |
 | `5d6794e` | 2023-04-17 | Fix erreur de sortie (Issue #139). |
 | `d9d59de` | 2025-02-03 | Suppression d'un hack format de stream SP3. |
-
-### 3.5 Qt apps (compilation, packaging)
-| Commit | Date | Description |
-|---|---|---|
-| `f04f127` | 2023-05-17 | **PR #138** — Compilation Qt 6.x, support macOS, mutex workaround `INHIBIT_RTK_LOCK_MACROS`, URL CORS rtkget. |
-| `b8198ef` | 2025-XX-XX | Install targets corrigés (launch / navi / plot / post / strsvr / srctblbrows). |
-| `bd43d0e` | 2025-XX-XX | Plot freq pour rtknavi-qt. |
+| `157919a` | 2025-07-22 | Mode `ppp-fixed` ajouté à `mode` (cosmétique — `ppp_ar.c` reste vide). |
+| `59dd319` | 2025-02-03 | `prstatus` affiche le thread rtk server en hex. |
 
 ---
 
@@ -371,31 +353,28 @@ Le passage à 4 fréquences (`199be2b`, avr. 2025) n'a pas propagé partout. Plu
 | 🟡 | `src/stream.c:111,1667,1724,1962` | NTRIP : pas de watchdog par message → SSR fragmenté/bloqué donne corrections stales >10s. |
 | 🟡 | `src/rtkcmn.c:722-735` | `code2idx` peut retourner -1 pour codes BeiDou B1C/B2a/B3I, Galileo E6, IRNSS récents si tables `code2freq_*` incomplètes → biais ignorés silencieusement. |
 
-### 6.5 🟠 Cohérence des interfaces utilisateur
+### 6.5 🟠 Cohérence interfaces CLI
 
 | Sévérité | Fichier:ligne | Problème |
 |---|---|---|
-| 🔴 | `app/winapp/rtkpost/postopt.cpp:744,784-785` | **Champs `PPPOpts` / `RnxOpts1` / `RnxOpts2` saisis en GUI mais non persistés dans INI** → perte des options custom au redémarrage. |
-| 🔴 | `app/consapp/rnx2rtkp/rnx2rtkp.c:51-52` | Help texte ne documente pas les modes 7/8/9 (`ppp-kinematic`, `ppp-static`, `ppp-fixed`) bien qu'ils fonctionnent via `-p`. |
-| 🟠 | `src/options.c:118` + `app/winapp/rtkpost/postmain.cpp:1042-1043` + `naviopt.cpp:442-443` | `pos2-rejionno` deprecated (`a06e9c1`) mais GUI Windows continue de lire/écrire `prcopt.maxinno[0/1]` directement → migration `pos2-rejphase` incomplète. |
-| 🟠 | `app/consapp/rnx2rtkz/rnx2rtkp.c:140-162` | CLI : pas de flags pour `pos2-gloarmode`, `pos2-bdsarmode`, `pos2-arthres1..4`, `pos2-armaxiter`, `pos2-varholdamb` → AR multi-constell uniquement via `-k config`. |
-| 🟠 | `app/winapp/rtkpost/postopt.cpp:254-257,945` | RTKPOST désactive `IonoOpt` pour PPP mais `IONOOPT_IFLC` n'est pas exposé non plus → utilisateur ne peut pas choisir iono-free explicite en GUI. |
-| 🟠 | `app/winapp/rtkpost/postopt.cpp:280-282` | Pas de validation `PPP-fixed + Freq=L1 seul` → combo accepté mais runtime ajuste silencieusement. |
-| 🟡 | `app/winapp/rtkpost/postopt.cpp:800-801` + `postmain.cpp:1003-1004` | `tidecorr` : combo index `0/1/2` mappé en bitmask `0/1/7` (hardcodé `if (>1) =7`) → bits intermédiaires (3,5) inaccessibles depuis GUI. |
-| 🟡 | `app/winapp/rtkpost/postopt.cpp:755-762` vs `src/options.c:190-195` | Fichiers ANTEX satellite/récepteur exposés en GUI mais `file-satantfile` / `file-rcvantfile` parsing config absent → divergence GUI ↔ CLI. |
-| 🟡 | `app/winapp/rtkpost/postopt.cpp:948-950` | `posopt3-6` (PHWOPT etc.) en checkbox sans tooltip explicatif PPP-spécifique. |
-| 🟡 | `app/consapp/rnx2rtkp/rnx2rtkp.c:46` | Pas de `-K outfile` pour sauvegarder la session → utilisateur doit éditer config à la main. |
+| 🔴 | `app/consapp/rnx2rtkp/rnx2rtkp.c:51-52` | Help text ne documente pas les modes 7/8/9 (`ppp-kinematic`, `ppp-static`, `ppp-fixed`) bien qu'ils fonctionnent via `-p`. |
+| 🟠 | `app/consapp/rnx2rtkp/rnx2rtkp.c:140-162` | CLI : pas de flags pour `pos2-gloarmode`, `pos2-bdsarmode`, `pos2-arthres1..4`, `pos2-armaxiter`, `pos2-varholdamb` → AR multi-constell uniquement via `-k config`. *(Note : AR PPP non opérationnelle de toute façon — cf. §1.8)* |
+| 🟠 | Structure `solopt_t` + `outprcopts` | Patches `35b6fee` et `569197d` modifient le format `.stat` (ajout fréquences/iono pour PPP, prstatus 5-7 freqs). Vos parsers `.stat` doivent être validés. |
+| 🟡 | `app/consapp/rnx2rtkp/rnx2rtkp.c:46` | Pas de `-K outfile` pour sauvegarder la session → édition config manuelle obligatoire. |
 
-### 6.6 ⚠️ Reproductibilité des rejeux `.tag` — bug structurel
+> Sections "Cohérence GUI" (PPPOpts non persistés, `pos2-rejionno` legacy, `tidecorr` bitmask GUI…) **retirées** : hors périmètre projet.
 
-**Symptôme** : un même fichier `.tag` rejoué deux fois dans la même instance RTKNAVI ne produit pas exactement la même solution. Lié au fait que `rtksvr` n'est pas ré-initialisé entre les démarrages successifs.
+### 6.6 ⚠️ Reproductibilité du rejeu `.tag` — bug `cmd_restart` rtkrcv
 
-| Commit | Date | Effet |
-|---|---|---|
-| `28ad77c` | 2026-05-01 | **Diagnostic posé**, fix laissé en commentaire. Dans `app/winapp/rtknavi/navimain.cpp` une ligne `//rtksvrinit(&rtksvr);  // uncomment this to make RTKNAVI repeatable from run to run` est ajoutée. **Il faut décommenter et recompiler** pour avoir la reproductibilité. Côté positif : init des `ssr.t0[]` à `time0` dans `rtksvrinit` (corrige les corrections SSR héritées d'un run précédent). |
-| `68a355b` | 2024-05-15 | Inversion de logique dans `instrdlg.cpp` (rtknavi-qt) : les fonctions `getFilePath()` / `setFilePath()` ont été renommées en `extractFilePath()` / `makePath()` car la sémantique était inversée. Avant : un path saisi avec `::T`, `::+<start>`, `::x<speed>` était mal extrait/affiché → la coche timetag ne reflétait pas le path réel. **C'est probablement le bug d'inversion observé.** |
+**Symptôme** : rejouer 2× le même fichier `.tag` via la commande `restart` de `rtkrcv` produit des solutions différentes. Cause : `cmd_restart` (`app/consapp/rtkrcv/rtkrcv.c:1078-1085`) appelle `stopsvr` puis `startsvr` **sans** `rtksvrinit` entre les deux → la structure `svr` (`nav`, `ssr`, `rtk`, état Kalman, historique observations) persiste entre les runs.
 
-**Recommandation pour ton sprint** : si tu veux fiabiliser les rejeux `.tag` sur 6c53, le patch utile à cherry-picker est la modification `navimain.cpp` de `28ad77c` (~3 lignes), mais en la **décommentant directement** plutôt que de la laisser en commentaire. Pour la version Qt, `68a355b` est plus gros (~70 lignes sur 7 fichiers) et touche uniquement l'UI Qt — à porter seulement si tu utilises rtknavi-qt.
+**Statut upstream** : aucun fix dans rtkrcv. Le commit `28ad77c` (mai 2026) ne corrige que RTKNAVI (Embarcadero), pas rtkrcv. Le commit `68a355b` (Jens Reimann, mai 2024) corrige une **inversion `getFilePath()`/`setFilePath()` dans rtknavi-qt** (probablement le souvenir du bug d'inversion) — mais c'est aussi côté UI Qt, pas rtkrcv.
+
+**Workaround actuel** : quitter et relancer le binaire `rtkrcv` à chaque rejeu (vs utiliser `restart` interactif).
+
+**Fix recommandé** : patch maison de 3 lignes dans `cmd_restart`, détaillé en **§7.7**. Inclus dans le sprint comme patch #10.
+
+**Validation** : `md5sum run1.pos == md5sum run2.pos` après deux exécutions consécutives sur le même `.tag`.
 
 ### 6.7 Autres effets de bord 🟡
 
@@ -442,60 +421,70 @@ dtr = (i == ref_sys)
 
 ### 7.1 Liste des 9 patches retenus
 
-| # | Prio | Commit | Fichier(s) | LOC | Ce qu'on corrige | Justification équipe |
+| # | Prio | Commit / Source | Fichier(s) | LOC | Ce qu'on corrige | Justification équipe |
 |---|---|---|---|---|---|---|
-| 1 | 🔴 | `1ff4727` | `rtkpos.c` | ~3 | Conversion m↔s manquante sur Kalman clock bias states | *"On corrige juste une unité oubliée — corruption silencieuse de la solution si l'init position ne converge pas."* |
+| 1 | 🔴 | `1ff4727` | `rtkpos.c` | ~3 | Conversion m↔s manquante sur Kalman clock bias states | *"On corrige une unité oubliée — corruption silencieuse si l'init position ne converge pas."* |
 | 2 | 🔴 | `b99d11b` | `ppp.c` | ~10 | `varerr()` PPP iono-free pour systèmes non L1/L2 | *"Sans ça, variance fausse pour Galileo E1/E5 → divergence en multi-constell."* |
 | 3 | 🔴 | `1a66490` | `ppp.c` | ~5 | Out-of-bounds dans `ppp.c` (PR M. Valgur, mergée upstream) | *"Bug mémoire détecté par contrib externe, fix accepté en upstream."* |
-| 4 | 🟠 | `efe4e67` | `rtkpos.c` | ~5 | Correction iono GLONASS dual-fréq (M. Valgur) | *"Erreur d'unité dans le calcul iono GLONASS."* |
+| 4 | 🟠 | `efe4e67` | `rtkpos.c` | ~5 | Correction iono GLONASS dual-fréq | *"Erreur d'unité dans le calcul iono GLONASS."* |
 | 5 | 🟠 | `b49ce01` | `rtkpos.c` | ~10 | AR cassée si GLO=off + `GLO_AR=fix-and-hold` (RTK) | *"Configuration GLO_AR ignorée silencieusement."* |
 | 6 | 🟠 | `5cfa31b` | `rinex.c` | ~3 | Roundoff timestamps RINEX (entrées 60s parasites avec `-TADJ`) | *"Évite des duplications d'époques en sortie RINEX."* |
 | 7 | 🟠 | `f1a7d2f` | `rtkpos.c` | ~5 | AR instantanée — reset excessif lock count (RTK) | *"Optimisation conservative de la logique de reset."* |
-| 8 | 🟡 | `269c2d5` | `rtcm3.c` | ~15 | Resync RTCM3 après message invalide | *"Évite la perte de messages SSR si données mixées."* |
-| 9 | 🟡 | `28ad77c` (partiel) | `app/winapp/rtknavi/navimain.cpp` | ~3 | Reproductibilité rejeux `.tag` — **décommenter** la ligne `rtksvrinit(&rtksvr)` au démarrage de RTKNAVI | *"Garantit qu'un rejeu du même `.tag` produit le même résultat. Critique pour la non-régression."* ⚠️ on prend le `rtksvrinit` non-commenté (différence avec upstream qui le laisse commenté). |
+| 8 | 🟠 | `269c2d5` | `rtcm3.c` | ~15 | Resync RTCM3 après message invalide | *"Évite la perte de messages SSR/RTCM en temps réel."* |
+| **9** | 🟠 | `6bb4ab2` | `rnx2rtkp.c` + `manual.docx` | ~10 | **Bug option `-sys` CLI rnx2rtkp** | *"Combinaison de constellations CLI mal interprétée — bug visible en post-process."* |
+| **10** | 🟠 | **patch maison** (cf. §7.7) | `app/consapp/rtkrcv/rtkrcv.c` | ~3 | **Reproductibilité `restart` rtkrcv** : ajouter `rtksvrinit(&svr)` dans `cmd_restart` entre `stopsvr` et `startsvr` | *"Garantit qu'un rejeu via `restart` produit le même résultat — critique pour notre validation."* |
+| **11** | 🟠 | `569197d` | `rtkrcv.c` | ~10 | `prstatus` rempli pour 5 à 7 fréquences | *"Nécessaire avec `NFREQ=4` : sans ça notre `.stat` parser voit des champs vides ou tronqués."* |
+| **12** | 🟡 | `9c9ec53` | `options.c` + apps | ~50 | Rework des position options | *"Cohérence config rcv. Vérifier que nos `.conf` chargent toujours sans warning."* |
+| **13** | 🟢 | **flag compil** | Makefile | 0 | `-DNFREQ=4` (pour u-blox X5) | *"Active les 4 fréquences X5 — voir section 8 pour limitations."* |
 
-**Total** : ~60 lignes de code touchées, sur 5 fichiers source distincts.
+**Total** : ~125 lignes de code touchées + 1 flag de compilation, sur 6-7 fichiers source distincts.
 
-**EXCLUS du sprint** (à argumenter si l'équipe demande pourquoi ces correctifs majeurs ne sont pas pris) :
-- ❌ `c0138bf` support `.BIA` — gros feature, ~200 lignes + suite de fixes
-- ❌ `d574080` refonte DCB/OSB — refactor tardif, propres bugs
-- ❌ `199be2b` `NFREQ=3→4` — propage partout
-- ❌ `c535238` cycle-slip Doppler — gros feature, change le comportement
-- ❌ Tout patch GUI (sauf #9 qui est trivial)
+**EXCLUS du sprint** (à argumenter en revue) :
+- ❌ `c0138bf` support `.BIA` — gros feature, ~200 lignes + suite de fixes (sprint 2)
+- ❌ `d574080` refonte DCB/OSB — refactor tardif, propres bugs (sprint 2)
+- ❌ `199be2b` `NFREQ=3→4` complet — change defaults UI/freq slots ; on prend juste le flag compil et `569197d` qui suffisent côté CLI
+- ❌ `c535238` cycle-slip Doppler — gros feature, change comportement (sprint 2)
+- ❌ Tous patches GUI (RTKPOST/RTKNAVI/Qt) — hors périmètre projet
 - ❌ `2e1ddfa` PPP sans broadcast — feature récente (fév. 2026), risque immature
+- ❌ `15445ce` auto-antenna selection — feature, à évaluer en sprint 2
 
 ### 7.2 Calendrier 2 semaines
 
 ```
-S1.J1   Geler 6c53 prod • capturer .pos référence sur 5-10 logs prod
-        diversifiés (par mode, environnement, récepteur)
-        Métriques baseline : RMS H/V, %fix, TTFF, %obs rejet
-S1.J2   Vérifier `git apply` propre des 9 patches sur 6c53
-        Tests unitaires si possibles sur fixes 1-3 (les plus simples)
-S1.J3   Appliquer patches 1→9 dans l'ordre, build propre à chaque étape
-        Un commit isolé par patch (rollback granulaire)
-S1.J4   Smoke par patch : 1 dataset rapide à chaque étape
-        Toute divergence inattendue → on isole le patch
-S1.J5   Run complet A/B (6c53 vs 6c53+patches) sur les 5-10 datasets
+S1.J1   Geler 6c53 prod • capturer .pos + .stat + .trace référence
+        sur 5-10 scénarios prod diversifiés (rnx2rtkp post-process
+        ET rtkrcv replay .tag) — toutes constellations / modes PPP
+        Métriques baseline : RMS H/V, %fix, TTFF, %obs rejet,
+                              checksums .stat et .trace
+S1.J2   Vérifier `git cherry-pick` propre des patches 1-12 sur 6c53
+        Rédiger patch #10 (rtkrcv cmd_restart cf §7.7)
+S1.J3   Appliquer patches 1→12 dans l'ordre, build propre à chaque
+        étape avec `-DNFREQ=4`. Un commit isolé par patch.
+S1.J4   Smoke par patch : 1 scénario rapide à chaque étape
+        (rnx2rtkp + rtkrcv replay), inspection .pos/.stat/.trace.
+S1.J5   Run complet A/B (6c53 vs 6c53+patches+NFREQ=4) sur les
+        5-10 scénarios — sortie .pos + .stat + .trace pour chacun.
 
-S2.J6   Triage Δscore (cf. §7.3) — investiguer toute dégradation > seuil
+S2.J6   Triage Δscore (§7.3) — investiguer toute dégradation > seuil
 S2.J7   Bisect inter-patch en cas de régression isolée
-S2.J8   Validation des fixes ciblés : reproduire scénarios déclencheurs
-        (ex: forcer init position non-convergente pour le fix #1,
-        rejouer 2× le même .tag pour valider #9)
-S2.J9   Doc : 1 page par patch (hash upstream, diff résumé, dataset
-        témoin, métrique avant/après)
+S2.J8   Validation ciblée :
+        - patch #1 : forcer init position non-convergente
+        - patch #2 : dataset multi-constell sans GPS L1/L2
+        - patch #10 : rtkrcv `restart` 2× même .tag → diff binaire = 0
+        - patch #11 : vérifier .stat colonnes 5-7 freqs renseignées
+        - flag NFREQ=4 : observer freq3 dans .stat
+S2.J9   Doc : 1 page par patch (hash upstream, diff, scénario témoin,
+        métrique avant/après, gotchas .stat/.trace)
 S2.J10  Review équipe • décision go/no-go par patch
-        (potentiellement on garde 7-8/9 si certains controversés)
-S2.J11  Canary 1 instance pendant 24-48h
-S2.J12  Monitoring renforcé sur le canary
+S2.J11  Canary 1 instance rtkrcv 24-48h en temps réel
+S2.J12  Monitoring renforcé canary (RMS, fix-rate, fraîcheur SSR)
 S2.J13  Décision deploy progressif
 S2.J14  Buffer • write-up • rétrospective
 ```
 
 ### 7.3 Critère de non-régression — `Δscore`
 
-Pour chaque dataset on calcule un score composite :
+Pour chaque scénario on calcule un score composite :
 
 ```
 Δscore = w1 · (RMS_H_after − RMS_H_before) / RMS_H_before
@@ -506,38 +495,144 @@ avec `w1=0.5`, `w2=0.3`, `w3=0.2`.
 
 **Critère pass** :
 - moyenne `Δscore < 0.02` (2% d'amélioration globale) **ET**
-- aucun dataset individuel ne dégrade de plus de 5% **ET**
-- patch #9 validé par un rejeu identique 2× (différence binaire `.pos` = 0)
+- aucun scénario individuel ne dégrade de plus de 5% **ET**
+- **patch #10 validé** : `rtkrcv` lancé deux fois sur le même `.tag` via `restart` produit `.pos` binairement identiques (`md5sum` égaux) **ET**
+- **format `.stat` cohérent** : nos parsers existants ne lèvent pas d'erreur sur les nouvelles sorties (impacts patches `35b6fee` / `569197d`).
 
-L'objectif n'est **pas la perfection** mais : *"on prouve que la moyenne s'améliore et qu'aucun dataset ne casse."*
+L'objectif n'est **pas la perfection** : *"on prouve que la moyenne s'améliore et qu'aucun scénario ne casse."*
 
 ### 7.4 Risques résiduels à signaler en kick-off
 
-1. **Dépendance GPS structurelle non corrigée** (cf. section 5) — à planifier en sprint dédié, gros refactor `udclk_ppp` + `pntpos`.
-2. **PPP-AR reste un no-op** (cf. section 1.8 — `ppp_ar.c` stub vide depuis 2016). Si vous comptez sur PPP-fixed, c'est en réalité PPP-kinematic. Sprint suivant : importer une implémentation tierce (rtklib-py partielle, PPP-Wizard).
-3. **Pas de support produits IGS modernes** (`.BIA`, OSB absolus) — sprint 2 obligatoire pour exploiter les flux SSR récents.
-4. **`NFREQ=3` figé** — pas de gain L5 sur récepteurs récents (F9P firmware moderne, X20). Sprint 2.
-5. **Rejeux `.tag` Qt** non couverts (le patch #9 ne touche que la version Embarcadero/Windows). Si vous utilisez rtknavi-qt en prod, le bug d'inversion (`68a355b`) reste à porter.
+1. **Dépendance GPS structurelle non corrigée** (cf. section 5) — sprint dédié, refactor `udclk_ppp` + `pntpos`.
+2. **PPP-AR reste un no-op** (cf. §1.8 — `ppp_ar.c` stub vide depuis 2016). Le mode `pos1-posmode=9` (`ppp-fixed`) tourne en réalité comme `ppp-kinematic`. **Si vos configs prod l'utilisent, sachez-le.** Sprint 2 = importer une implémentation tierce (rtklib-py / PPP-Wizard) + support `.BIA`.
+3. **`NFREQ=4` partiellement appliqué** (cf. section 8) — vous gagnez les observations 4ᵉ freq mais sans iono-free, sans SSR sur cette freq, sans cycle-slip GF/MW. À fiabiliser en sprint 2.
+4. **Pas de support produits IGS modernes** (`.BIA`, OSB absolus) — sprint 2.
+5. **Patch #10 est maison** — pas accepté upstream, à maintenir nous-mêmes (mais c'est 3 lignes triviales).
+6. **Format `.stat` change** avec patches `569197d` (et `35b6fee` indirect) — vérifier nos parsers prod **avant** déploiement.
 
 ### 7.5 Brief équipe — talking points
 
-> **Contexte** : on est sur 6c53 (sept. 2021), validé en prod. 4½ ans de fixes upstream à intégrer mais on ne veut pas tout réavaler en bloc.
+> **Contexte** : on est sur 6c53 (sept. 2021), validé en prod. 4½ ans de fixes upstream à intégrer mais on ne veut pas tout réavaler en bloc. Périmètre projet : CLI uniquement (`rnx2rtkp` post-process + `rtkrcv` temps réel).
 >
-> **Approche** : sprint chirurgical de 9 patches isolés (~60 LOC totales), ciblant les bugs critiques **sans** changement de comportement majeur. Aucun nouveau feature, aucun refactor.
+> **Approche** : sprint chirurgical de 12 patches isolés + 1 flag de compilation (~125 LOC totales), ciblant les bugs critiques **sans** changement de comportement majeur. Aucun feature, aucun refactor.
 >
-> **Garantie** : chaque patch est commit-isolé → rollback granulaire en 1 minute. Validation A/B sur logs production existants. Critère : moyenne ≥ baseline et aucun dataset ne casse.
+> **Garantie** : chaque patch commit-isolé → rollback granulaire. Validation A/B sur scénarios prod existants. Critère : moyenne ≥ baseline et aucun scénario ne casse, **plus** un test reproductibilité strict (`md5sum` identique sur rejeu rtkrcv).
 >
-> **Hors-périmètre explicite** : support `.BIA`, OSB, `NFREQ=4`, PPP-AR, refonte DCB/OSB → sprint 2 (planifié séparément, après ce premier passage de fiabilisation).
+> **Plus-value spécifique X5** : compilation `-DNFREQ=4` + patch `569197d` → on exploite les 4 fréquences en observations, lecture `.stat` cohérente.
 >
-> **Effort équivalent** : ~10 j/h (1 dev plein), 4-5 j/h validation (revue datasets + canary), ~2 j/h doc & rétro.
+> **Hors-périmètre explicite** : support `.BIA`, OSB, PPP-AR, refonte DCB/OSB, GUIs → sprint 2.
+>
+> **Effort estimé** : ~10 j/h dev (1 dev plein), 4-5 j/h validation, ~2 j/h doc.
 
 ### 7.6 Outillage à préparer (J0)
 
-- Script harness : `compare_pos.py` (input : `pos_baseline/*.pos`, `pos_candidate/*.pos` ; output : table Δscore par dataset + verdict pass/fail)
-- Snapshot des 5-10 datasets de référence + leurs `.pos` baseline figés (avant tout patch)
+- Script harness `compare_pos.py` : input `pos_baseline/*.pos` + `pos_candidate/*.pos` → table Δscore par scénario + verdict pass/fail
+- Script `replay_rtkrcv.sh` : lance `rtkrcv` deux fois consécutives sur le même `.tag`, vérifie `md5sum` identiques (test du patch #10)
+- Script `parse_stat.py` : valide que les `.stat` candidat parsent toujours avec nos parsers existants (test du patch #11 et `35b6fee`)
+- Snapshot 5-10 scénarios + leurs `.pos`/`.stat`/`.trace` baseline figés (avant tout patch)
 - Branche `sprint-1-cherrypicks` à partir du tag de prod actuel
 - Procédure rollback documentée (revert d'un commit = revert d'un patch)
 
+### 7.7 Patch #10 — code prêt à committer
+
+**Fichier** : `app/consapp/rtkrcv/rtkrcv.c`
+
+**Diff** (à appliquer après cherry-pick des patches 1-9, 11-12) :
+
+```diff
+--- a/app/consapp/rtkrcv/rtkrcv.c
++++ b/app/consapp/rtkrcv/rtkrcv.c
+@@ -1078,6 +1078,9 @@ static void cmd_restart(char **args, int narg, vt_t *vt)
+     trace(3,"cmd_restart:\n");
+
+     stopsvr(vt);
++    /* re-init server state for replay reproducibility */
++    /* Without this, .nav, .ssr, .rtk etc. persist between runs */
++    rtksvrinit(&svr);
+     if (!startsvr(vt)) return;
+     vt_printf(vt,"rtk server restart\n");
+ }
+```
+
+**Justification équipe** : sans `rtksvrinit` entre `stopsvr` et `startsvr`, la structure `svr` conserve les éphémérides, corrections SSR, état Kalman et historique observations du run précédent. Conséquence : rejouer 2× le même fichier `.tag` via la commande `restart` donne des solutions différentes — critique pour notre validation et nos tests de non-régression. Le patch est strictement additif (3 lignes), sans effet sur le démarrage initial qui appelle déjà `rtksvrinit` ligne 1831.
+
+**Test associé** :
+```bash
+# Avant patch #10 : md5sum différents attendus
+rtkrcv -m start_replay.cmd > run1.pos && md5sum run1.pos
+rtkrcv -m start_replay.cmd > run2.pos && md5sum run2.pos
+# Avec patch #10 : md5sum identiques requis (critère pass)
+```
+
 ---
 
-*Synthèse établie sur 1298 commits (805 hors merges) entre `6c53aa2` et `28ad77c`. Sélection par filtrage sur les fichiers `ppp.c`, `ppp_ar.c`, `ppp_corr.c`, `preceph.c`, `sbas.c`, `ionex.c`, `rtkpos.c`, `pntpos.c`, `rtcm3.c`, `rinex.c`, et les apps `rtkpost*`, `rtknavi*`, `rnx2rtkp`, `rtkrcv`. Section 6 issue de 4 audits parallèles (cœur PPP / interfaces / produits externes / SSR-multi-fréq). Section 7 = plan d'action sprint.*
+## 8. NFREQ=4 pour u-blox X5 — état d'avancement et reste à faire
+
+> Compiler `-DNFREQ=4` donne accès aux 4 fréquences en observations. Mais l'audit (§6.1) a montré que la propagation de `NFREQ=4` est partielle dans les algos. Voici ce qui marche, ce qui ne marche pas, et les patches à écrire en sprint 2.
+
+### 8.1 ✅ Ce qui marche avec `-DNFREQ=4`
+
+- Stockage des observations 4ᵉ fréq (`obs->L[3]`, `obs->P[3]`, `obs->code[3]`, `obs->SNR[3]`, `obs->LLI[3]`) — structure `obsd_t` (`rtklib.h:586-591`) est dimensionnée `[NFREQ+NEXOBS]`.
+- Décodage des 4 fréquences depuis u-blox UBX (`rcv/ublox.c`).
+- Décodage RTCM3 MSM (4 fréquences observation).
+- Sortie RINEX 4 fréquences (`convbin`).
+- SPP (single point positioning) utilise les 4 freqs si disponibles.
+- Sortie `.pos` standard (positions identiques avec/sans `NFREQ=4` si on n'utilise pas la 4ᵉ freq dans le filtre).
+- Sortie `.stat` colonnes 5-7 freqs renseignées **après cherry-pick `569197d`** (patch #11).
+
+### 8.2 ⚠️ Ce qui ne marche pas / partiellement
+
+| Sévérité | Problème | Fichier:ligne | Effet sur PPP X5 |
+|---|---|---|---|
+| 🔴 | `seliflc()` retourne au max 2 — la 4ᵉ fréq n'est **jamais** sélectionnée pour iono-free | `rtkcmn.c:3744` | iono-free PPP n'utilise que freq 0+f2 où f2 ≤ 2 → la fréq 3 est ignorée pour la combinaison principale |
+| 🔴 | `gfmeas()` / `mwmeas()` n'utilisent que `obs->code[0]` et `[1]` | `ppp.c:385-406` | Cycle-slip GF / Melbourne-Wubbena uniquement entre freq 0 et 1 → cycle-slip sur freq 2 ou 3 invisible (LLI seul) |
+| 🔴 | `ssr_t.deph[3]`, `ddeph[3]`, `dclk[3]` figés à 3 | `rtklib.h:834-836` | Corrections SSR orbit/clock pour la 4ᵉ fréq impossibles → si SSR utilisé en temps réel, la freq 3 n'a pas de correction précise |
+| 🔴 | Boucles `for (k=0;k<3;k++)` dans decode SSR1/2/3 | `rtcm3.c:1629-1638, 1674-1695, 1710-1725` | Conséquence directe du point précédent côté décodeur |
+| 🟠 | `EFACT_GPS_L5` seul existe, pas d'`EFACT_GAL_L5` ni `EFACT_CMP_L5` etc. | `ppp.c:355-357` | Variance L5/E5a/B2a sous-estimée pour non-GPS → poids trop fort en filtre |
+| 🟠 | `obs->Pstd[frq]` / `Lstd[frq]` accédés sans guard `frq<NFREQ` | `ppp.c:368-369` | Si récepteur fournit > NFREQ stdevs : OOB. Pour NFREQ=4 c'est OK pour X5 mais à surveiller |
+| 🟠 | `test_hold_amb()` ne teste que `fix[0]` et `fix[1]` | `ppp.c:1162` | Fix-and-hold sur freq 2,3 jamais validé (impact si PPP-AR un jour) |
+| 🟠 | Slip iono-free hardcodé à `slip[0] \|\| slip[1]` | `ppp.c:754` | Slip sur freq 2 ou 3 ne réinitialise pas le biais iono-free |
+| 🟡 | Facteur iono-free `SQR(3.0)` valide pour GPS L1/L2 uniquement | `ppp.c:372` | Variance iono-free fausse si combinaison utilise des fréquences proches (ex: E1/E5b) |
+
+### 8.3 Conséquence pratique pour vos runs PPP X5
+
+| Scénario | Fonctionne ? | Commentaire |
+|---|---|---|
+| SPP / standalone 4 freqs | ✅ Oui | Bénéfice direct |
+| PPP iono-free L1/L2 GPS classique | ✅ Inchangé | Fréq 3 ignorée mais pas gênant |
+| PPP iono-free GPS+GAL+BDS multi-constell | 🟡 Partiel | Variances/scaling faux pour non-GPS, mais converge |
+| PPP exploitant E1/E5a + E1/E5b + E1/E6 simultanément | ❌ Non | `seliflc` ne sélectionne qu'une combinaison à la fois |
+| PPP temps réel + SSR pour la 4ᵉ freq | ❌ Non | `ssr_t` ne stocke que 3 corrections |
+| Détection cycle-slip robuste sur freq 3 | ❌ Non | LLI uniquement |
+| PPP-fixed (AR) sur 4 freqs | ❌ Non | `ppp_ar.c` vide de toute façon |
+
+→ **Pour un sprint 1 limité** : `-DNFREQ=4` + patch #11 (`569197d`) suffisent. Vous avez les observations en `.stat` et la SPP/iono-free L1/L2 reste fiable.
+
+### 8.4 Sprint 2 — patches à écrire pour rendre NFREQ=4 propre
+
+Estimation à partir de l'audit. Aucun de ces patches n'existe upstream — c'est du dev maison.
+
+| Tâche | Effort estimé | Fichiers | Description |
+|---|---|---|---|
+| 1. Étendre `seliflc()` pour `nf≥4` | ½ jour | `rtkcmn.c` | Choix dynamique freq2 selon système (E1/E5b ou E1/E5a pour Galileo, B1C/B2a pour BeiDou) |
+| 2. Paramétrer `gfmeas`/`mwmeas` | 1 jour | `ppp.c` | Boucle sur paires (0, f2) avec f2 ∈ {1, 2, 3} si dispos |
+| 3. `EFACT_*_L5` par constellation | ½ jour | `ppp.c`, `rtklib.h` | Ajouter `EFACT_GAL_L5`, `EFACT_CMP_L5`, `EFACT_IRN_L5` (valeurs par défaut 5.0) |
+| 4. Élargir `ssr_t.deph/ddeph/dclk` à `[NFREQ]` ou `[MAXFREQ]` | 1 jour | `rtklib.h`, `rtcm3.c`, `rtkcmn.c` | Refactor structure + boucles décodage SSR1/2/3 |
+| 5. Facteur iono-free dynamique | ½ jour | `ppp.c:372` | Calculer `SQR(f1/(f1-f2))` selon les fréquences réelles utilisées |
+| 6. Slip iono-free utilisant `f2` dynamique | ½ jour | `ppp.c:754` | Référencer `slip[seliflc(nf,sys)]` au lieu de `slip[1]` |
+| 7. `test_hold_amb` boucle sur toutes freqs | ¼ jour | `ppp.c:1162` | Boucle `for (f=0; f<opt->nf; f++)` |
+| 8. Guards `obs->Pstd[frq]` / `Lstd[frq]` | ¼ jour | `ppp.c:368-369` | `if (frq < NFREQ)` avant accès |
+
+**Total sprint 2 spécifique NFREQ=4** : ~4-5 jours. À combiner avec support `.BIA` + PPP-AR pour un sprint 2 complet de ~3-4 semaines.
+
+### 8.5 Validation X5 spécifique
+
+Tests à ajouter au harness :
+- Compter le nombre d'observations `freq[3]` dans `.stat` (proxy : présence de SNR colonne 5+)
+- Vérifier que les positions PPP en mode iono-free L1/L2 sont **identiques** entre `NFREQ=3` et `NFREQ=4` (la 4ᵉ freq ne doit pas dégrader la solution sur les modes existants)
+- Tracer (`.trace` level 3+) la sélection `seliflc` pour confirmer le comportement attendu
+- Mesurer le gain SPP avec/sans 4ᵉ freq sur scénarios à faible visibilité
+
+---
+
+*Synthèse établie sur 1298 commits (805 hors merges) entre `6c53aa2` et `28ad77c`. Sélection par filtrage sur les fichiers `ppp.c`, `ppp_ar.c`, `ppp_corr.c`, `preceph.c`, `sbas.c`, `ionex.c`, `rtkpos.c`, `pntpos.c`, `rtcm3.c`, `rinex.c`, `rtkcmn.c`, et les apps CLI `rnx2rtkp` et `rtkrcv`. Périmètre projet = CLI uniquement (UI Embarcadero / Qt non couverts). Section 6 issue de 4 audits parallèles. Section 7 = plan d'action sprint 1. Section 8 = plan NFREQ=4 (sprint 1 partiel + sprint 2 complet).*
