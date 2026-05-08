@@ -95,16 +95,21 @@
 | `621cf6b` | 2024-04-13 | SBAS `decode_sbstype6` : évite une lecture hors-bornes depuis `iodf[]`. |
 | `5675351` | 2025-02-28 | Option `tidecorr` : passe en bitmask (granularité fine sur les marées). |
 
-### 1.8 Résolution d'ambiguïtés (PPP-AR / fix-and-hold)
-| Commit | Date | Description |
+### 1.8 Résolution d'ambiguïtés (RTK uniquement — PPP-AR ⚠️ non implémenté)
+
+> ⚠️ **`src/ppp_ar.c` est un stub vide** depuis 2016 (commit Takasu *"1.1 delete codes"*). La fonction `ppp_ar()` retourne 0 inconditionnellement. Le mode `PMODE_PPP_FIXED` existe dans le parser et la GUI mais ne fait **rien de plus que `PPP_KINEMA`** côté résolution d'ambiguïté. Aucun commit depuis 6c53 ne l'a réimplémenté. Tous les commits ci-dessous concernent l'AR **RTK** (`rtkpos.c`/`lambda.c`), pas PPP.
+
+| Commit | Date | Description (AR **RTK** — pas PPP) |
 |---|---|---|
 | `f1a7d2f` | 2024-07-03 | Bug en résolution d'ambiguïté instantanée (reset excessif du `lock count`). |
 | `b49ce01` | 2021-11-04 | AR retries cassée si GLO désactivé mais `GLO_AR=fix-and-hold`. |
-| `157919a` | 2025-07-22 | `rtkrcv` : ajout de `ppp-fixed` à la commande `mode`. |
-| `4509b10` | 2025-04-22 | Label / tooltip de la combo-box "ambiguity resolution" corrigés. |
-| `0aedab3` | 2025-04-09 | Renommage de la combo-box AR (cohérence). |
-| `cf3f876` | 2023-10-10 | Ajout d'un statement pré-compilo pour la sortie des ambiguïtés. |
+| `157919a` | 2025-07-22 | `rtkrcv` : ajout de `ppp-fixed` à la commande `mode` (mode reconnu, mais sans effet réel sur l'AR). |
+| `4509b10` | 2025-04-22 | Label / tooltip de la combo-box "ambiguity resolution" (RTK). |
+| `0aedab3` | 2025-04-09 | Renommage de la combo-box AR. |
+| `cf3f876` | 2023-10-10 | Statement pré-compilo pour la sortie des ambiguïtés. |
 | `413c4a5` | 2023-10-10 | Dimensions cohérentes pour l'init des biais. |
+
+**Conséquence pratique** : ne pas attendre de fix d'ambiguïté en PPP avec ce fork. Pour PPP-AR fonctionnel, il faut un autre fork (PPP-Wizard, Net_Diff, ou rtklib-py qui a une implémentation partielle).
 
 ### 1.9 Cycle-slip / qualité observations
 | Commit | Date | Description |
@@ -381,7 +386,18 @@ Le passage à 4 fréquences (`199be2b`, avr. 2025) n'a pas propagé partout. Plu
 | 🟡 | `app/winapp/rtkpost/postopt.cpp:948-950` | `posopt3-6` (PHWOPT etc.) en checkbox sans tooltip explicatif PPP-spécifique. |
 | 🟡 | `app/consapp/rnx2rtkp/rnx2rtkp.c:46` | Pas de `-K outfile` pour sauvegarder la session → utilisateur doit éditer config à la main. |
 
-### 6.6 🟡 Divers — effets de bord
+### 6.6 ⚠️ Reproductibilité des rejeux `.tag` — bug structurel
+
+**Symptôme** : un même fichier `.tag` rejoué deux fois dans la même instance RTKNAVI ne produit pas exactement la même solution. Lié au fait que `rtksvr` n'est pas ré-initialisé entre les démarrages successifs.
+
+| Commit | Date | Effet |
+|---|---|---|
+| `28ad77c` | 2026-05-01 | **Diagnostic posé**, fix laissé en commentaire. Dans `app/winapp/rtknavi/navimain.cpp` une ligne `//rtksvrinit(&rtksvr);  // uncomment this to make RTKNAVI repeatable from run to run` est ajoutée. **Il faut décommenter et recompiler** pour avoir la reproductibilité. Côté positif : init des `ssr.t0[]` à `time0` dans `rtksvrinit` (corrige les corrections SSR héritées d'un run précédent). |
+| `68a355b` | 2024-05-15 | Inversion de logique dans `instrdlg.cpp` (rtknavi-qt) : les fonctions `getFilePath()` / `setFilePath()` ont été renommées en `extractFilePath()` / `makePath()` car la sémantique était inversée. Avant : un path saisi avec `::T`, `::+<start>`, `::x<speed>` était mal extrait/affiché → la coche timetag ne reflétait pas le path réel. **C'est probablement le bug d'inversion observé.** |
+
+**Recommandation pour ton sprint** : si tu veux fiabiliser les rejeux `.tag` sur 6c53, le patch utile à cherry-picker est la modification `navimain.cpp` de `28ad77c` (~3 lignes), mais en la **décommentant directement** plutôt que de la laisser en commentaire. Pour la version Qt, `68a355b` est plus gros (~70 lignes sur 7 fichiers) et touche uniquement l'UI Qt — à porter seulement si tu utilises rtknavi-qt.
+
+### 6.7 Autres effets de bord 🟡
 
 | Sévérité | Fichier:ligne | Problème |
 |---|---|---|
@@ -390,7 +406,7 @@ Le passage à 4 fréquences (`199be2b`, avr. 2025) n'a pas propagé partout. Plu
 | 🟡 | `src/ppp.c:819-821` | DCB L5 estimé inconditionnellement si `nf ≥ 3`, même en `IONOOPT_IFLC` (1 fréq effective) → degré de liberté Kalman gaspillé. |
 | 🟡 | `src/rtklib.h:162` | Si `NEXOBS=0`, observations indice ≥ NFREQ filtrées dans `save_msm_obs` → L5/E6 perdus silencieusement. |
 
-### 6.7 Note sur la dépendance GPS (réf. section 5)
+### 6.8 Note sur la dépendance GPS (réf. section 5)
 
 L'audit confirme la dépendance documentée en section 5 (`src/ppp.c:618-622`) et propose un **pattern de fix** validé par revue indépendante :
 
@@ -407,7 +423,7 @@ dtr = (i == ref_sys)
 
 À ouvrir en PR upstream après validation jeux de tests.
 
-### 6.8 Synthèse priorisée
+### 6.9 Synthèse priorisée
 
 **Top 5 fixes à viser immédiatement** :
 1. 🔴 `ssr_t.deph[3]` / `dclk[3]` → `[NFREQ]` (`rtklib.h:834-836`)
