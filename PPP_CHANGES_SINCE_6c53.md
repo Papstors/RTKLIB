@@ -272,7 +272,7 @@ Conséquence en cascade :
 
 1. **Mode `EPHOPT_PREC`** : le commentaire `/* neglect receiver inter-system bias */` est **explicite** — les ISB du récepteur sont volontairement ignorés, tout est calé sur `dtr[0]`. Sans GPS, instable.
 2. **Pas de sélection dynamique** d'un système de référence alternatif si GPS manque.
-3. **`FREQL1`** reste la fréquence de référence pour les facteurs de scaling iono dans `pntpos.c:323`, `rtkpos.c:1297-1298`, `ppp.c:684`/`995`. Mais `FREQL1` (1.57542 GHz) est partagée avec Galileo E1 et BeiDou B1C → **ce n'est pas une dépendance à recevoir GPS**, juste une constante de ratio. ✅ Cette partie est OK.
+3. **`FREQL1`** reste la fréquence de référence pour les facteurs de scaling iono dans `src/pntpos.c:323`, `src/rtkpos.c:1297-1298`, `src/ppp.c:684`/`995`. Mais `FREQL1` (1.57542 GHz) est partagée avec Galileo E1 et BeiDou B1C → **ce n'est pas une dépendance à recevoir GPS**, juste une constante de ratio. ✅ Cette partie est OK.
 
 ### 5.5 Recommandations pratiques
 
@@ -403,11 +403,11 @@ dtr = (i == ref_sys)
 ### 6.9 Synthèse priorisée
 
 **Top 5 fixes à viser immédiatement** :
-1. 🔴 `ssr_t.deph[3]` / `dclk[3]` → `[NFREQ]` (`rtklib.h:834-836`)
+1. 🔴 `ssr_t.deph[3]` / `dclk[3]` → `[NFREQ]` (`src/rtklib.h:834-836`)
 2. 🔴 Guards `sat > 0` dans `preceph.c` (≥10 occurrences)
 3. 🔴 Persistence `PPPOpts` dans INI RTKPOST/RTKNAVI Windows
-4. 🔴 `seliflc()` cas `nf≥4` (`rtkcmn.c:3744`)
-5. 🔴 Facteur iono-free dynamique au lieu de `SQR(3.0)` (`ppp.c:372`)
+4. 🔴 `seliflc()` cas `nf≥4` (`src/rtkcmn.c:3744`)
+5. 🔴 Facteur iono-free dynamique au lieu de `SQR(3.0)` (`src/ppp.c:372`)
 
 **Bilan global** : 7 issues 🔴 critiques (corruption mémoire, perte données utilisateur, biais algorithmiques majeurs), 24 🟠 moyennes (dégradations qualité solution / UX), 18 🟡 mineures.
 
@@ -568,11 +568,11 @@ rtkrcv -m start_replay.cmd > run2.pos && md5sum run2.pos
 
 ## 8. NFREQ multi-fréquence pour Septentrio Mosaic X5 — état d'avancement et reste à faire
 
-> Le récepteur cible projet est le **Septentrio Mosaic X5** (format SBF, parser `src/rcv/septentrio.c`). Capacités : GPS L1/L2/L5, GLO L1/L2/L3, Galileo E1/E5a/E5b/E5-AltBOC/E6, BeiDou B1I/B1C/B2a/B2b/B3I, QZSS L1/L2/L5/L6, NavIC L5, SBAS L1/L5 — soit **jusqu'à 5-6 fréquences par constellation**. RTKLIB définit `MAXFREQ=6` (`rtklib.h:99`) et `NFREQ=3` par défaut (`rtklib.h:157`). L'audit (§6.1) a montré que `NFREQ>3` est partiellement appliqué dans les algos. Cette section discute le compromis et le reste à faire.
+> Le récepteur cible projet est le **Septentrio Mosaic X5** (format SBF, parser `src/rcv/septentrio.c`). Capacités : GPS L1/L2/L5, GLO L1/L2/L3, Galileo E1/E5a/E5b/E5-AltBOC/E6, BeiDou B1I/B1C/B2a/B2b/B3I, QZSS L1/L2/L5/L6, NavIC L5, SBAS L1/L5 — soit **jusqu'à 5-6 fréquences par constellation**. RTKLIB définit `MAXFREQ=6` (`src/rtklib.h:99`) et `NFREQ=3` par défaut (`src/rtklib.h:157`). L'audit (§6.1) a montré que `NFREQ>3` est partiellement appliqué dans les algos. Cette section discute le compromis et le reste à faire.
 
 ### 8.1 ✅ Ce qui marche avec `-DNFREQ=4`
 
-- Stockage des observations 4ᵉ fréq (`obs->L[3]`, `obs->P[3]`, `obs->code[3]`, `obs->SNR[3]`, `obs->LLI[3]`) — structure `obsd_t` (`rtklib.h:586-591`) est dimensionnée `[NFREQ+NEXOBS]`.
+- Stockage des observations 4ᵉ fréq (`obs->L[3]`, `obs->P[3]`, `obs->code[3]`, `obs->SNR[3]`, `obs->LLI[3]`) — structure `obsd_t` (`src/rtklib.h:586-591`) est dimensionnée `[NFREQ+NEXOBS]`.
 - Décodage des 4 fréquences depuis u-blox UBX (`rcv/ublox.c`).
 - Décodage RTCM3 MSM (4 fréquences observation).
 - Sortie RINEX 4 fréquences (`convbin`).
@@ -622,14 +622,14 @@ Vue d'ensemble lue dans `src/rtkcmn.c:611-706` (`code2freq_*`). **Le mapping dé
 
 | Sévérité | Problème | Fichier:ligne | Effet PPP Mosaic X5 |
 |---|---|---|---|
-| 🟠 | `seliflc()` retourne au max 2 | `rtkcmn.c:3744` | iono-free PPP n'utilise que freq 0+f2 (f2 ≤ 2) → freqs ≥3 ignorées pour combinaison principale |
-| 🟠 | `gfmeas()` / `mwmeas()` n'utilisent que `code[0]` et `code[1]` | `ppp.c:385-406` | Cycle-slip GF / Melbourne-Wubbena uniquement entre freq 0,1 → cycle-slip freq 2-5 via LLI seul |
-| 🟠 | `EFACT_GPS_L5` seul existe (pas `EFACT_GAL_L5` etc.) | `ppp.c:355-357` | Variance L5/E5a/B2a sous-estimée pour non-GPS → poids trop fort en filtre |
-| 🟠 | `obs->Pstd[frq]` / `Lstd[frq]` accédés sans guard | `ppp.c:368-369` | OOB potentiel si récepteur fournit > NFREQ stdevs |
-| 🟠 | `test_hold_amb()` ne teste que `fix[0]` et `fix[1]` | `ppp.c:1162` | Fix-and-hold sur freq 2-5 jamais validé (impact PPP-AR futur) |
-| 🟠 | Slip iono-free hardcodé `slip[0] \|\| slip[1]` | `ppp.c:754` | Slip freq 2-5 ne réinit pas biais iono-free |
-| 🟡 | Facteur iono-free `SQR(3.0)` valide pour GPS L1/L2 uniquement | `ppp.c:372` | Variance iono-free légèrement biaisée pour combinaisons E1/E5x ou B1/B2x |
-| 🟡 | DCB L5 (`uddcb_ppp`) seul biais récepteur estimé | `ppp.c:819-821` | NFREQ≥4 nécessite des biais récepteur additionnels (DCB E5b, E6, B1C, B3) — actuellement absorbés dans les ambiguïtés |
+| 🟠 | `seliflc()` retourne au max 2 | `src/rtkcmn.c:3744` | iono-free PPP n'utilise que freq 0+f2 (f2 ≤ 2) → freqs ≥3 ignorées pour combinaison principale |
+| 🟠 | `gfmeas()` / `mwmeas()` n'utilisent que `code[0]` et `code[1]` | `src/ppp.c:385-406` | Cycle-slip GF / Melbourne-Wubbena uniquement entre freq 0,1 → cycle-slip freq 2-5 via LLI seul |
+| 🟠 | `EFACT_GPS_L5` seul existe (pas `EFACT_GAL_L5` etc.) | `src/ppp.c:355-357` | Variance L5/E5a/B2a sous-estimée pour non-GPS → poids trop fort en filtre |
+| 🟠 | `obs->Pstd[frq]` / `Lstd[frq]` accédés sans guard | `src/ppp.c:368-369` | OOB potentiel si récepteur fournit > NFREQ stdevs |
+| 🟠 | `test_hold_amb()` ne teste que `fix[0]` et `fix[1]` | `src/ppp.c:1162` | Fix-and-hold sur freq 2-5 jamais validé (impact PPP-AR futur) |
+| 🟠 | Slip iono-free hardcodé `slip[0] \|\| slip[1]` | `src/ppp.c:754` | Slip freq 2-5 ne réinit pas biais iono-free |
+| 🟡 | Facteur iono-free `SQR(3.0)` valide pour GPS L1/L2 uniquement | `src/ppp.c:372` | Variance iono-free légèrement biaisée pour combinaisons E1/E5x ou B1/B2x |
+| 🟡 | DCB L5 (`uddcb_ppp`) seul biais récepteur estimé | `src/ppp.c:819-821` | NFREQ≥4 nécessite des biais récepteur additionnels (DCB E5b, E6, B1C, B3) — actuellement absorbés dans les ambiguïtés |
 
 > ⚠️ **Note SSR clarifiée** : `ssr_t.deph[3]/ddeph[3]/dclk[3]` sont des composantes RAC + polynôme C0/C1/C2 — **pas des indices de fréquence**. Les corrections SSR orbit/clock sont scalaires par satellite et s'appliquent à toutes les fréquences. Les biais SSR3 (code) et SSR7 (phase) sont indexés par signal-code (`MAXCODE=70`), couvrant tous les signaux Mosaic X5.
 
@@ -671,14 +671,14 @@ Estimation à partir de l'audit corrigé. Aucun de ces patches n'existe upstream
 
 | Tâche | Effort estimé | Fichiers | Description |
 |---|---|---|---|
-| 1. Étendre `seliflc()` pour `nf≥4` | ½ jour | `rtkcmn.c:3744` | Choix dynamique freq2 selon système et NFREQ |
-| 2. Paramétrer `gfmeas`/`mwmeas` | 1 jour | `ppp.c:385-406` | Boucle sur paires (0, f2) avec f2 ∈ {1, 2, …, nf-1} |
-| 3. `EFACT_*_L5` par constellation | ½ jour | `ppp.c:355-357` + `rtklib.h` | Ajouter `EFACT_GAL_L5`, `EFACT_CMP_L5`, `EFACT_IRN_L5` |
-| 4. Facteur iono-free dynamique | ½ jour | `ppp.c:372` | Calculer `SQR(f1/(f1-f2))` selon paire réelle |
-| 5. Slip iono-free utilisant `f2` dynamique | ½ jour | `ppp.c:754` | Référencer `slip[seliflc(nf,sys)]` |
-| 6. `test_hold_amb` boucle sur toutes freqs | ¼ jour | `ppp.c:1162` | `for (f=0; f<opt->nf; f++)` |
-| 7. Guards `obs->Pstd[frq]` / `Lstd[frq]` | ¼ jour | `ppp.c:368-369` | `if (frq < NFREQ)` avant accès |
-| 8. **DCB récepteur étendu** (E5b, E6, B1C, B3) | 1-2 jours | `ppp.c:819-821`, `rtklib.h` | Estimer 1 DCB par freq>2 (ou par paire avec freq 0). Sans cela les biais récepteur sont absorbés par les ambiguïtés et la convergence est lente |
+| 1. Étendre `seliflc()` pour `nf≥4` | ½ jour | `src/rtkcmn.c:3744` | Choix dynamique freq2 selon système et NFREQ |
+| 2. Paramétrer `gfmeas`/`mwmeas` | 1 jour | `src/ppp.c:385-406` | Boucle sur paires (0, f2) avec f2 ∈ {1, 2, …, nf-1} |
+| 3. `EFACT_*_L5` par constellation | ½ jour | `src/ppp.c:355-357` + `rtklib.h` | Ajouter `EFACT_GAL_L5`, `EFACT_CMP_L5`, `EFACT_IRN_L5` |
+| 4. Facteur iono-free dynamique | ½ jour | `src/ppp.c:372` | Calculer `SQR(f1/(f1-f2))` selon paire réelle |
+| 5. Slip iono-free utilisant `f2` dynamique | ½ jour | `src/ppp.c:754` | Référencer `slip[seliflc(nf,sys)]` |
+| 6. `test_hold_amb` boucle sur toutes freqs | ¼ jour | `src/ppp.c:1162` | `for (f=0; f<opt->nf; f++)` |
+| 7. Guards `obs->Pstd[frq]` / `Lstd[frq]` | ¼ jour | `src/ppp.c:368-369` | `if (frq < NFREQ)` avant accès |
+| 8. **DCB récepteur étendu** (E5b, E6, B1C, B3) | 1-2 jours | `src/ppp.c:819-821`, `rtklib.h` | Estimer 1 DCB par freq>2 (ou par paire avec freq 0). Sans cela les biais récepteur sont absorbés par les ambiguïtés et la convergence est lente |
 
 **Total sprint 2 spécifique NFREQ≥5** : ~4-5 jours. Combiner avec support `.BIA` + PPP-AR pour un sprint 2 complet ~3-4 semaines.
 
