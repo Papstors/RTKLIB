@@ -435,9 +435,11 @@ dtr = (i == ref_sys)
 | **10** | 🟠 | **patch maison** (cf. §7.7) | `app/consapp/rtkrcv/rtkrcv.c` | ~3 | **Reproductibilité `restart` rtkrcv** : ajouter `rtksvrinit(&svr)` dans `cmd_restart` entre `stopsvr` et `startsvr` | *"Garantit qu'un rejeu via `restart` produit le même résultat — critique pour notre validation."* |
 | **11** | 🟠 | `569197d` | `rtkrcv.c` | ~10 | `prstatus` rempli pour 5 à 7 fréquences | *"Nécessaire avec `NFREQ=4` : sans ça notre `.stat` parser voit des champs vides ou tronqués."* |
 | **12** | 🟡 | `9c9ec53` | `options.c` + apps | ~50 | Rework des position options | *"Cohérence config rcv. Vérifier que nos `.conf` chargent toujours sans warning."* |
-| **13** | 🟢 | **flag compil** | Makefile | 0 | `-DNFREQ=4` (pour u-blox X5) | *"Active les 4 fréquences X5 — voir section 8 pour limitations."* |
+| **13** | 🟢 | **flag compil** | Makefile | 0 | `-DNFREQ=4` (pour Mosaic X5 multi-fréq, étape vers NFREQ=6 en sprint 2) | *"Active 4 fréquences X5 — voir §8 pour limitations connues."* |
+| **14** | 🔴 | **cluster Septentrio** : `670690a` + `784056a` + `253bfb3` + `26ed828` + `79991f2` | `src/rcv/septentrio.c` | ~250 | Refonte parser SBF (buffer par époque + commit fin d'époque) + flush début lecture + multi-stream thread-safe + fix rejeu | *"Mosaic X5 = notre récepteur. Sans ce cluster on perd des observations en streaming et on a des datasets incohérents au rejeu `.tag`. Cohérent à prendre en bloc."* |
+| **15** | 🟠 | Septentrio annexes : `d2c94b3` + `431ec5a` + `682d64b` + `8080af0` + `62d2b69` | `src/rcv/septentrio.c` | ~80 | RCVSTDS option + GLO unaligned access + SBAS sbslongcorrh + UTC BDS CNAV + GPS raw cnav | *"Compléments du cluster #14 — qualité/pondération obs et fixes de décodage spécifiques signaux Mosaic."* |
 
-**Total** : ~125 lignes de code touchées + 1 flag de compilation, sur 6-7 fichiers source distincts.
+**Total** : ~455 lignes de code touchées + 1 flag de compilation, sur 7-8 fichiers source distincts.
 
 **EXCLUS du sprint** (à argumenter en revue) :
 - ❌ `c0138bf` support `.BIA` — gros feature, ~200 lignes + suite de fixes (sprint 2)
@@ -518,7 +520,7 @@ L'objectif n'est **pas la perfection** : *"on prouve que la moyenne s'améliore 
 >
 > **Garantie** : chaque patch commit-isolé → rollback granulaire. Validation A/B sur scénarios prod existants. Critère : moyenne ≥ baseline et aucun scénario ne casse, **plus** un test reproductibilité strict (`md5sum` identique sur rejeu rtkrcv).
 >
-> **Plus-value spécifique X5** : compilation `-DNFREQ=4` + patch `569197d` → on exploite les 4 fréquences en observations, lecture `.stat` cohérente.
+> **Plus-value spécifique Mosaic X5** : cluster Septentrio (#14 + #15) qui fiabilise le parser SBF + RCVSTDS + signaux modernes ; compilation `-DNFREQ=4` + patch `569197d` → on exploite 4 fréquences en observations, lecture `.stat` cohérente. NFREQ=6 (toutes fréquences Mosaic) reporté au sprint 2 après patches §8.4.
 >
 > **Hors-périmètre explicite** : support `.BIA`, OSB, PPP-AR, refonte DCB/OSB, GUIs → sprint 2.
 >
@@ -566,9 +568,9 @@ rtkrcv -m start_replay.cmd > run2.pos && md5sum run2.pos
 
 ---
 
-## 8. NFREQ=4 pour u-blox X5 — état d'avancement et reste à faire
+## 8. NFREQ multi-fréquence pour Septentrio Mosaic X5 — état d'avancement et reste à faire
 
-> Compiler `-DNFREQ=4` donne accès aux 4 fréquences en observations. Mais l'audit (§6.1) a montré que la propagation de `NFREQ=4` est partielle dans les algos. Voici ce qui marche, ce qui ne marche pas, et les patches à écrire en sprint 2.
+> Le récepteur cible projet est le **Septentrio Mosaic X5** (format SBF, parser `src/rcv/septentrio.c`). Capacités : GPS L1/L2/L5, GLO L1/L2/L3, Galileo E1/E5a/E5b/E5-AltBOC/E6, BeiDou B1I/B1C/B2a/B2b/B3I, QZSS L1/L2/L5/L6, NavIC L5, SBAS L1/L5 — soit **jusqu'à 5-6 fréquences par constellation**. RTKLIB définit `MAXFREQ=6` (`rtklib.h:99`) et `NFREQ=3` par défaut (`rtklib.h:157`). L'audit (§6.1) a montré que `NFREQ>3` est partiellement appliqué dans les algos. Cette section discute le compromis et le reste à faire.
 
 ### 8.1 ✅ Ce qui marche avec `-DNFREQ=4`
 
@@ -594,19 +596,26 @@ rtkrcv -m start_replay.cmd > run2.pos && md5sum run2.pos
 | 🟠 | Slip iono-free hardcodé à `slip[0] \|\| slip[1]` | `ppp.c:754` | Slip sur freq 2 ou 3 ne réinitialise pas le biais iono-free |
 | 🟡 | Facteur iono-free `SQR(3.0)` valide pour GPS L1/L2 uniquement | `ppp.c:372` | Variance iono-free fausse si combinaison utilise des fréquences proches (ex: E1/E5b) |
 
-### 8.3 Conséquence pratique pour vos runs PPP X5
+### 8.3 Conséquence pratique pour vos runs PPP Mosaic X5
 
-| Scénario | Fonctionne ? | Commentaire |
+| Scénario | NFREQ=3 | NFREQ=4 | NFREQ=6 | Commentaire |
+|---|---|---|---|---|
+| SPP / standalone | ✅ 3 freqs | ✅ 4 freqs | ✅ 6 freqs | Gain direct par fréq supplémentaire |
+| PPP iono-free L1/L2 classique | ✅ | ✅ | ✅ | Inchangé, freqs >2 ignorées |
+| PPP iono-free GPS+GAL+BDS multi-constell | 🟡 | 🟡 | 🟡 | Variances faux pour non-GPS, converge quand même |
+| PPP exploitant E1/E5a + E1/E5b + E1/E6 simultanément | ❌ | ❌ | ❌ | `seliflc` ne sélectionne qu'une paire à la fois |
+| PPP temps réel + SSR sur freqs ≥3 | ❌ | ❌ | ❌ | `ssr_t.deph[3]/dclk[3]` figé à 3 — **gros gap pour Mosaic X5 multi-fréq** |
+| Détection cycle-slip robuste sur freqs ≥2 | ❌ | ❌ | ❌ | LLI uniquement (Septentrio LLI fiable, donc OK en pratique) |
+| PPP-fixed (AR) | ❌ | ❌ | ❌ | `ppp_ar.c` vide de toute façon |
+
+#### Choix NFREQ pour le projet
+
+| Option | Avantages | Risques |
 |---|---|---|
-| SPP / standalone 4 freqs | ✅ Oui | Bénéfice direct |
-| PPP iono-free L1/L2 GPS classique | ✅ Inchangé | Fréq 3 ignorée mais pas gênant |
-| PPP iono-free GPS+GAL+BDS multi-constell | 🟡 Partiel | Variances/scaling faux pour non-GPS, mais converge |
-| PPP exploitant E1/E5a + E1/E5b + E1/E6 simultanément | ❌ Non | `seliflc` ne sélectionne qu'une combinaison à la fois |
-| PPP temps réel + SSR pour la 4ᵉ freq | ❌ Non | `ssr_t` ne stocke que 3 corrections |
-| Détection cycle-slip robuste sur freq 3 | ❌ Non | LLI uniquement |
-| PPP-fixed (AR) sur 4 freqs | ❌ Non | `ppp_ar.c` vide de toute façon |
+| **`NFREQ=4`** (sprint 1) | Compromis : 4 fréqs disponibles, audit identifie peu de cas critique | Laisse de côté E5-AltBOC, E6, B2b, B3I sur Mosaic X5 |
+| **`NFREQ=6`** (sprint 2) | Exploite tout le Mosaic X5 | Aggravation des bugs §6.1 (`ssr_t[3]`, `seliflc≤2`, `gfmeas` freq[0,1]) → patches §8.4 deviennent prérequis |
 
-→ **Pour un sprint 1 limité** : `-DNFREQ=4` + patch #11 (`569197d`) suffisent. Vous avez les observations en `.stat` et la SPP/iono-free L1/L2 reste fiable.
+**Recommandation actuelle** : `NFREQ=4` au sprint 1 (cohérent avec patch #11 `569197d` qui ouvre `prstatus` à 5-7 freqs), passage à `NFREQ=6` au sprint 2 **après** patches §8.4. Ne pas sauter cette étape — `NFREQ=6` direct sur HEAD sans les patches expose des comportements imprévisibles sur les 4ᵉ-6ᵉ fréquences.
 
 ### 8.4 Sprint 2 — patches à écrire pour rendre NFREQ=4 propre
 
@@ -625,13 +634,14 @@ Estimation à partir de l'audit. Aucun de ces patches n'existe upstream — c'es
 
 **Total sprint 2 spécifique NFREQ=4** : ~4-5 jours. À combiner avec support `.BIA` + PPP-AR pour un sprint 2 complet de ~3-4 semaines.
 
-### 8.5 Validation X5 spécifique
+### 8.5 Validation Mosaic X5 spécifique
 
 Tests à ajouter au harness :
-- Compter le nombre d'observations `freq[3]` dans `.stat` (proxy : présence de SNR colonne 5+)
-- Vérifier que les positions PPP en mode iono-free L1/L2 sont **identiques** entre `NFREQ=3` et `NFREQ=4` (la 4ᵉ freq ne doit pas dégrader la solution sur les modes existants)
+- Compter le nombre d'observations `freq[3]` (et `freq[4]`, `freq[5]` si NFREQ=6) dans `.stat` (proxy : présence de SNR colonnes 5+)
+- Vérifier que les positions PPP en mode iono-free L1/L2 sont **identiques** entre `NFREQ=3` et `NFREQ=4` (les fréqs ≥3 ne doivent pas dégrader la solution sur les modes existants)
 - Tracer (`.trace` level 3+) la sélection `seliflc` pour confirmer le comportement attendu
-- Mesurer le gain SPP avec/sans 4ᵉ freq sur scénarios à faible visibilité
+- Mesurer le gain SPP avec/sans fréqs supplémentaires sur scénarios à faible visibilité
+- **Spécifique Mosaic X5** : vérifier que les SBF MeasEpoch + EndOfMeas reçus sur 4-6 fréqs sont bien décodés sur `670690a` + `784056a` cluster (sinon perte d'observations sur certains signaux Galileo E5-AltBOC / E6 / BeiDou B2b)
 
 ---
 
@@ -932,31 +942,53 @@ CFLAGS += -mavx2 -mfma
 
 ### 11.1 Récepteurs binaires (parsers `src/rcv/*.c`)
 
-Activité importante depuis 6c53. Si vos récepteurs en prod incluent ces formats, regardez :
+#### Septentrio Mosaic X5 (`src/rcv/septentrio.c`) — récepteur projet 🎯
 
-#### u-blox (`src/rcv/ublox.c`)
-| Commit | Date | Description |
-|---|---|---|
-| `c671b39` | 2025-04-18 | **Table signaux X20** — pertinent si vous évoluez du X5 vers X20 |
-| `9859df3` | 2025-XX | **Galileo E5a F/NAV support** + catch E6 CNAV non supporté |
-| `8080af0` | 2025-XX | Décodage UTC BDS CNAV corrigé (sept + ublox) |
-| `23af6dd` | 2025-XX | `rxmsfrbx` : catch BDS CNAV1/CNAV2 non supportés |
-| `b3bd537` | 2024-XX | `rxmrawx` : détection changement bit half-cycle subtract |
-| `8a10dd5` | 2024-XX | Defaults `MAX_STD_CP` / `STD_SLIP` avant parsing |
-| `4df03b9` | 2022-01-25 | u-blox SFRBX nouveau firmware F9P (Galileo nav msg length changée) |
-| `c0b4cd9` | 2022-06-21 | `NEXTOBS=3` cohérent et fix priorité observations |
+**Cluster critique 2024-2025** — refonte du parser SBF + cascade de fixes. À prendre en bloc cohérent (sinon perte d'observations ou incohérences inter-époques) :
 
-#### Septentrio (`src/rcv/septentrio.c`) — beaucoup de fixes
+| Prio | Commit | Date | Effet |
+|---|---|---|---|
+| 🔴 | `670690a` | 2024-06-28 | **Refonte parser** : observations bufferisées en mémoire puis commit en fin d'époque (vs commit immédiat). 197 lignes touchées. |
+| 🔴 | `784056a` | 2024-07-11 | Complément à `670690a` : observations passées à RTKLIB **même si l'event-end-block manque**. Critique en streaming temps réel si Mosaic X5 omet des EOEB. |
+| 🔴 | `253bfb3` | 2024-08-07 | Flush au début des routines de lecture (déplace le check) → évite datasets incohérents inter-époques (bug Jens Reimann). |
+| 🔴 | `26ed828` | 2024-08-25 | Static data déplacé dans `struct raw` → permet **multi-stream SBF simultané, thread-safe**. Important si vous décodez plusieurs streams (rover + base). |
+| 🔴 | `79991f2` | 2025-05-25 | **Bug rejeu / 2ᵉ passe** : sur conversion ou rejeu, `convrnx` rejetait observations non plus récentes que le buffer → données manquantes. **Pertinent pour vous : `.tag` replay et conversion SBF→RINEX.** |
+| 🟠 | `d2c94b3` | 2024-08-10 | SNR, doppler, GLO FCN, **option `RCVSTDS`** (stddev observations dans RINEX → meilleure pondération filtre). |
+| 🟠 | `431ec5a` | 2024-08-08 | GLO raw cnav : évite accès subframe **non aligné** → critique si build ARM strict alignment. |
+| 🟠 | `682d64b` | 2024-08-29 | `sbslongcorrh` : décodage temps corrigé (SBAS sur Mosaic). |
+| 🟠 | `8080af0` | 2025-07-10 | Décodage UTC BDS CNAV corrigé. |
+| 🟠 | `62d2b69` | 2024-06-27 | `decode_gpsrawcnav` `decode_frame` fix. |
+| 🟡 | `3a319cd` | 2024-08-25 | Implémente le rx setup block. |
+| 🟡 | `0724c41` | 2024-08-29 | `ID_GEOALM` (case ajouté, pas implémenté). |
+| 🟡 | `5126471` | 2024-08-29 | `flushobuf` : passe la return value. |
+| 🟡 | `85d3098`, `2f23eb3`, `12b26b7`, `f781271`, `f3fae72`, `d79439f` | 2024 | Cascade de fixes mineurs (guards, redondance, updates incrementales). |
+
+→ **Recommandation forte** : intégrer ce cluster Septentrio comme un **groupe de patches consécutifs** dans le sprint, pas en cherry-pick isolé. Les commits sont cohérents : appliquer `670690a` sans `784056a` ou `253bfb3` peut introduire des régressions transitoires.
+
+#### Autres récepteurs (pour info, non utilisés actuellement)
+
+##### u-blox (`src/rcv/ublox.c`)
 | Commit | Description |
 |---|---|
-| `d2c94b3` | snr, doppler, GLO fcn, ajout option `RCVSTDS` |
-| `85d3098`, `0724c41`, `5126471`, `26ed828` | divers fixes |
-| `682d64b` | `sbslongcorrh` : décodage temps corrigé |
-| `253bfb3` | Données incohérentes Septentrio — fix |
-| `62d2b69` | `decode_gpsrawcnav` `decode_frame` fix |
-| `431ec5a` | GLO raw cnav : éviter accès subframe non aligné |
-| `3a319cd` | Implémente le rx setup block |
-| `79991f2` | SBF : observation est plus récente que le buffer |
+| `c671b39` | Table signaux X20 |
+| `9859df3` | Galileo E5a F/NAV support |
+| `b3bd537` | `rxmrawx` : détection bit half-cycle subtract |
+| `8a10dd5` | Defaults `MAX_STD_CP` / `STD_SLIP` |
+| `4df03b9` | SFRBX firmware F9P (Galileo nav length changée) |
+
+##### Unicore (`src/rcv/unicore.c`) — parser nouveau
+| Commit | Description |
+|---|---|
+| `572268e` | Nouveau parser binaire Unicore |
+| `9673752` | QZSS L1CB (L1E) et L1S (L1Z) |
+| `d771a40` | Support option `RCVSTDS` |
+
+##### Novatel / Bynav / Tersus
+| Commit | Description |
+|---|---|
+| `f2269ca` | Bynav M2 series dans novatel.c |
+| `d9bd56d` | Bynav Galileo code E1B → E1BC |
+| `f018851` | Tersus `bd2ephemb` |
 
 #### Unicore (`src/rcv/unicore.c`) — parser nouveau ou refondu
 | Commit | Description |
@@ -1151,8 +1183,8 @@ Si vous voulez moderniser votre build :
 
 | Si vous… | Regardez en priorité |
 |---|---|
-| Utilisez u-blox X5 (et planifiez X20 plus tard) | §11.1 ublox + table X20 (`c671b39`) |
-| Avez du Septentrio en parc | §11.1 septentrio (~10 fixes en cascade) |
+| Utilisez **Septentrio Mosaic X5** (récepteur projet) | **§11.1 cluster Septentrio (refonte parser + cascade fixes) — patches #14/#15 du sprint** |
+| Évoluez vers d'autres récepteurs (u-blox, Unicore…) | §11.1 sections "autres récepteurs" |
 | Convertissez du RTCM3 / RINEX 3.05+ | §11.2 + §11.3 (codes BeiDou modernes, GLO nav 3.05) |
 | Faites du PPP statique long-run | §11.4 tides IERS mean pole + VMF1 fixes |
 | Sortez du NMEA GST ou GGA avec refstationid | §11.6 |
