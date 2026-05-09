@@ -635,4 +635,64 @@ Tests à ajouter au harness :
 
 ---
 
-*Synthèse établie sur 1298 commits (805 hors merges) entre `6c53aa2` et `28ad77c`. Sélection par filtrage sur les fichiers `ppp.c`, `ppp_ar.c`, `ppp_corr.c`, `preceph.c`, `sbas.c`, `ionex.c`, `rtkpos.c`, `pntpos.c`, `rtcm3.c`, `rinex.c`, `rtkcmn.c`, et les apps CLI `rnx2rtkp` et `rtkrcv`. Périmètre projet = CLI uniquement (UI Embarcadero / Qt non couverts). Section 6 issue de 4 audits parallèles. Section 7 = plan d'action sprint 1. Section 8 = plan NFREQ=4 (sprint 1 partiel + sprint 2 complet).*
+## 9. Documentation — décision doc-as-code
+
+> Décision projet : **doc-as-code** sur ce dépôt git, rendu via **Astro** (statique, accessible aux non-tech). Confluence éventuel uniquement en miroir lecture-seule plus tard si besoin externe.
+
+### 9.1 Pourquoi doc-as-code
+
+- **Version doc liée au commit code** : un tag git = un état complet (spec + design + test + code). Confluence ne sait pas le faire.
+- **Revue PR = revue doc** : sign-off auditable via CODEOWNERS + required reviewers.
+- **Diff/blame natifs** : qui a changé quoi, quand, pourquoi.
+- **Traçabilité automatisable** : matrice spec ↔ test ↔ code générée par CI.
+
+### 9.2 Arborescence cible
+
+```
+docs/
+├── specs/          # exigences fonctionnelles (REQ-*)
+├── design/         # doc design / architecture (DES-*)
+├── tests/          # protocoles tests (TST-*)
+├── adr/            # Architecture Decision Records (ADR-NNNN)
+└── runbooks/       # procédures ops (rollback, canary, replay…)
+```
+
+### 9.3 Traçabilité
+
+- **IDs stables** : `REQ-PPP-001`, `DES-PPP-001`, `TST-PPP-001`, `ADR-0001`
+- Front-matter YAML par doc avec champs `id`, `status`, `linked-to`, `verified-by`
+- CI génère une **matrice de traçabilité** (REQ → DES → TST → commit)
+
+### 9.4 ADRs
+
+Une décision = un ADR daté et numéroté. Exemples typiques pour ce projet :
+- ADR-0001 : Choix de rester sur 6c53 + cherry-pick (vs migration b34l)
+- ADR-0002 : Compilation `-DNFREQ=4` pour u-blox X5
+- ADR-0003 : Patch maison rtkrcv `cmd_restart` (cf. §7.7)
+- ADR-0004 : Périmètre projet = CLI uniquement (UI exclue)
+- ADR-0005 : Sprint 2 = `.BIA` + PPP-AR
+- ADR-0006 : Doc-as-code + Astro
+
+### 9.5 Validation CI
+
+- Liens cassés (lychee ou markdown-link-check)
+- IDs orphelins / dupliqués (script maison sur front-matter)
+- Schéma front-matter valide
+- Tests intégrés (TST-* exécutables liés à un script de test)
+- Build Astro doit passer
+
+### 9.6 Rendu archivé par release
+
+À chaque tag git :
+- Astro build → static site déployé (Pages ou serveur interne)
+- Snapshot HTML/PDF archivé pour audit (avec hash commit)
+- Matrice de traçabilité figée dans la release
+
+### 9.7 Hors-périmètre immédiat
+
+- Miroir Confluence : reporté, à n'envisager que si parties prenantes externes le demandent explicitement
+- Workflow signature électronique : à voir selon contraintes qualité/réglementaires
+
+---
+
+*Synthèse établie sur 1298 commits (805 hors merges) entre `6c53aa2` et `28ad77c`. Périmètre projet = CLI uniquement. Section 6 issue de 4 audits parallèles. Section 7 = sprint 1. Section 8 = plan NFREQ=4. Section 9 = décision doc-as-code (Astro).*
