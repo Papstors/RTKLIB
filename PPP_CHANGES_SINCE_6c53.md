@@ -173,8 +173,8 @@
 | `c4514fe` | 2023-10-10 | Options CLI start / end time. |
 | `d1ab09e` | 2023-10-10 | Fix du paramétrage du fichier de sortie en CLI. |
 | `343c245` | 2023-10-10 | Ne vérifie le suffixe de sortie qu'en cas d'extension invalide. |
-| `ca3befa` | 2025-XX | `rnx2rtkp` : par défaut, navsys inclut Galileo et BDS. |
-| `72dca37` | 2025-XX | BDS ajouté aux systèmes par défaut. |
+| `ca3befa` | 2026-04-25 | `rnx2rtkp` : par défaut, navsys inclut Galileo et BDS. |
+| `72dca37` | 2026-04-25 | BDS ajouté aux systèmes par défaut. |
 | `93fdbcd` | 2023-09-21 | gfortran lib dans makefile rnx2rtkp pour gcc (gain perf). |
 | `423ecd2` | 2025-05-21 | Options de format d'entrée corrigées + ajout `CLK`. |
 
@@ -1160,9 +1160,9 @@ Variantes CM5 à 4 / 8 / 16 GB → la RAM n'est plus un facteur limitant. Les se
 | Commit | Date | Description |
 |---|---|---|
 | `0654233` | 2025-04-25 | **RINEX 3.05 navigation GLONASS et RTCM3** |
-| `84224bb` | 2025-XX | `convrnx` : RINEX 3.05 et **codes RINEX 4** |
-| `3097353` | 2025-XX | rtkconv : fix versions 3.05+ |
-| `687a894` | 2025-XX | RINEX : lecture nav GLONASS corrigée |
+| `84224bb` | 2024-12-11 | `convrnx` : RINEX 3.05 et **codes RINEX 4** |
+| `3097353` | 2025-05-29 | rtkconv : fix versions 3.05+ |
+| `687a894` | 2025-06-04 | RINEX : lecture nav GLONASS corrigée |
 | `ebf532a` | 2024-11-22 | RINEX clk 3.04 : offset système header corrigé |
 | `d3dc227` | 2026-04-27 | RINEX header : parsing système fichier clk |
 
