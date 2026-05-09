@@ -926,4 +926,240 @@ CFLAGS += -mavx2 -mfma
 
 ---
 
-*Synthèse établie sur 1298 commits (805 hors merges) entre `6c53aa2` et `28ad77c`. Périmètre projet = CLI uniquement. Section 6 issue de 4 audits parallèles (algo / interfaces / produits externes / SSR-multi-fréq). Section 7 = sprint 1. Section 8 = plan NFREQ=4. Section 9 = décision doc-as-code (Astro). Section 10 = optimisation latence/CPU/RAM issue de 3 audits parallèles ciblés rtkrcv temps réel.*
+## 11. Autres améliorations notables non couvertes plus haut
+
+> Survey ciblé pour ne rien laisser de côté. Périmètre toujours CLI (rnx2rtkp + rtkrcv).
+
+### 11.1 Récepteurs binaires (parsers `src/rcv/*.c`)
+
+Activité importante depuis 6c53. Si vos récepteurs en prod incluent ces formats, regardez :
+
+#### u-blox (`src/rcv/ublox.c`)
+| Commit | Date | Description |
+|---|---|---|
+| `c671b39` | 2025-04-18 | **Table signaux X20** — pertinent si vous évoluez du X5 vers X20 |
+| `9859df3` | 2025-XX | **Galileo E5a F/NAV support** + catch E6 CNAV non supporté |
+| `8080af0` | 2025-XX | Décodage UTC BDS CNAV corrigé (sept + ublox) |
+| `23af6dd` | 2025-XX | `rxmsfrbx` : catch BDS CNAV1/CNAV2 non supportés |
+| `b3bd537` | 2024-XX | `rxmrawx` : détection changement bit half-cycle subtract |
+| `8a10dd5` | 2024-XX | Defaults `MAX_STD_CP` / `STD_SLIP` avant parsing |
+| `4df03b9` | 2022-01-25 | u-blox SFRBX nouveau firmware F9P (Galileo nav msg length changée) |
+| `c0b4cd9` | 2022-06-21 | `NEXTOBS=3` cohérent et fix priorité observations |
+
+#### Septentrio (`src/rcv/septentrio.c`) — beaucoup de fixes
+| Commit | Description |
+|---|---|
+| `d2c94b3` | snr, doppler, GLO fcn, ajout option `RCVSTDS` |
+| `85d3098`, `0724c41`, `5126471`, `26ed828` | divers fixes |
+| `682d64b` | `sbslongcorrh` : décodage temps corrigé |
+| `253bfb3` | Données incohérentes Septentrio — fix |
+| `62d2b69` | `decode_gpsrawcnav` `decode_frame` fix |
+| `431ec5a` | GLO raw cnav : éviter accès subframe non aligné |
+| `3a319cd` | Implémente le rx setup block |
+| `79991f2` | SBF : observation est plus récente que le buffer |
+
+#### Unicore (`src/rcv/unicore.c`) — parser nouveau ou refondu
+| Commit | Description |
+|---|---|
+| `572268e` | Nouveau parser binaire Unicore + makefile updates |
+| `9673752` | QZSS L1CB (L1E) et L1S (L1Z) |
+| `d771a40` | Support option `RCVSTDS` |
+| `edfc770` | Fix recording stddev observations |
+| `1c9152a` | Fix message length |
+| `11ae800` | `decode_obsvmb` retourne 0 si pas d'observations |
+
+#### Novatel / Bynav / Tersus
+| Commit | Description |
+|---|---|
+| `f2269ca` | **Support Bynav M2 series** dans novatel.c |
+| `d9bd56d` | Bynav Galileo code E1B → E1BC |
+| `f018851` | Support Tersus `bd2ephemb` |
+| `8d658e5` | Comparaisons time tolérance vs zéro |
+
+### 11.2 RTCM3 — nouveaux messages et fixes
+
+| Commit | Description |
+|---|---|
+| `511410b` | **Support type 1013 (system parameters)** |
+| `e3df221` | MSM : signal types **R3, R4, R6, L9** (BeiDou modernes) |
+| `45079b0` | Messages 1001-1004, 1009-1012 : limite max satellites corrigée |
+| `8e04ef6` | Nouveaux codes BeiDou en RTCM3→RINEX, freq 3 BDS B2A→B3, MSM sync bit fix sur erreur de length |
+| `2e1540b` | `encode_type1012` : assignment fcn inutile retiré |
+| `30482bf` | GLONASS désactivé dans build : divers fixes |
+| `784e62d` | `rtcm2` : décodage observations complet |
+
+### 11.3 RINEX — versions 3.04 / 3.05 / 4
+
+| Commit | Date | Description |
+|---|---|---|
+| `0654233` | 2025-04-25 | **RINEX 3.05 navigation GLONASS et RTCM3** |
+| `84224bb` | 2025-XX | `convrnx` : RINEX 3.05 et **codes RINEX 4** |
+| `3097353` | 2025-XX | rtkconv : fix versions 3.05+ |
+| `687a894` | 2025-XX | RINEX : lecture nav GLONASS corrigée |
+| `ebf532a` | 2024-11-22 | RINEX clk 3.04 : offset système header corrigé |
+| `d3dc227` | 2026-04-27 | RINEX header : parsing système fichier clk |
+
+### 11.4 Tides solides — refonte significative
+
+Avant 6c53 : tides en partie en Fortran ou external. Depuis :
+| Commit | Description |
+|---|---|
+| `e00b170` | **`hardisp` traduit en C et inliné** |
+| `8c9d5dc` | **`dehanttideinel` traduit en C et inliné** |
+| `e7093aa` | Code de référence IERS `hardisp` importé |
+| `817ec8a` | Library IERS mise à jour |
+| `a425d7e` | **IERS secular mean pole mis à jour** (vrai impact PPP statique long-run) |
+| `92f8a6d` | `tidedisp` utilise `ecef2pos` pour latitude plus précise |
+| `5675351` | `tidecorr` en bitmask |
+| `9a2f2ec`, `be9a673` | VMF1_HT subroutine fix (×2) |
+| `8158789` | Import partiel SOFA C library pour sun/moon |
+
+### 11.5 ERP / EOP / référentiels
+
+| Commit | Description |
+|---|---|
+| `954b0cf` | `readerp` : support **IGS UT1-TAI offsets** |
+| `c570df8` | qtapps : reconnaissance extensions `.EOF` `.ERP` |
+
+### 11.6 Sortie solution (NMEA / KML / GPX / stat)
+
+| Commit | Description |
+|---|---|
+| `7d7a3d7` | **NMEA GST sentence** (output) |
+| `4994033` | `outnmea_gga` : ajout `refstationid` |
+| `f361dac` | `outnmea_gsa` : respect du compteur de satellites |
+| `180aadd` | `pos2kml` : option position moyenne unique + sortie CSV |
+| `de71695` | `convgpx`, `convkml` : libère le buffer solution |
+| `10fc00e` | rtkplot : reconnaît extension `.nma` comme NMEA |
+| `24f0dc3` | `MAXSOLMSG` augmenté à 32768 (overflow) |
+| `3524b5d` | `outsolstat` : OOB fix |
+| `e6a3f09` | `outsolstat` : buffer agrandi |
+
+### 11.7 Outils CLI annexes
+
+#### convbin
+| Commit | Description |
+|---|---|
+| `5bea1ca` | Support unicore dans usage |
+| `89cd7e4` | Defaults : toutes fréquences |
+| `8491151` | Time : utilise start/end si fournis |
+| `7f67c28` | Init GLONASS FCN |
+| `788504f` | Default time tolerance 0.0→0.005 (sync RTKCONV, évite duplications) |
+
+#### str2str
+| Commit | Description |
+|---|---|
+| `4d1057d` | **Support fichiers de log** |
+| `1c178e7` | Messages par output stream |
+| `cf4ab29` | `readcmd` : évite tailles constantes |
+| `505a034` | Usage : exemple `-msg` avant `-out` |
+| `70f31aa` | Fix null pointer deref si pas de log files |
+
+#### Tous consapp
+| Commit | Description |
+|---|---|
+| `02ec964` | Flag **`--version`** (utile pour vos releases) |
+| `493d80e` | `--detach from console` (str2str + rtkrcv) |
+| `b4202eb` | Codes de sortie normalisés |
+
+### 11.8 Postpos / multi-file (utile rnx2rtkp)
+
+| Commit | Description |
+|---|---|
+| `5964d8a` | Étend la fenêtre temps obs base pour interpolation |
+| `1a47317` | Aligne header ref position |
+| `b88dfee` | `procpos` : catch malloc failure (anti-crash) |
+| `a1c9242` | Allocation pour tous les infiles en unit periods |
+| `e995e50` | Évite over-allocation dans `ifile[]` |
+| `87d9060` | `rtkinit` : évite duplication sans `rtkfree` |
+
+### 11.9 Modes positionnement (rnx2rtkp + rtkrcv)
+
+| Commit | Description |
+|---|---|
+| `6577aa2`/`1d1b7e9` | Mode **`Static-Start`** ajouté (manquait) |
+| `4b519f3` | **Moving-base RTK** amélioré + baseline constraint indep + skip estimées initiales SPP |
+| `1854c43`, `5cbcc16`, `ba05d40` | Bugs solutions backwards-only / fwd+bwd |
+| `1574edf` | DGPS mode : fixes |
+| `fa8e46c` | Cycle slip Doppler en backwards filter |
+
+### 11.10 Build system — passage CMake (significatif pour vous)
+
+Si vous voulez moderniser votre build :
+| Commit | Description |
+|---|---|
+| `e82cd7d` | Support CMake initial |
+| `8e62852` | Revert (instable) |
+| `bb563a0` | **Re-add CMake support** |
+| `fbf5688` | CMake : support modèle IERS |
+| `ffe4d49` | Tests unitaires existants ajoutés au CMake |
+| `14dd080` | CMake : tests inclus pour console apps |
+| `3273ed9` | Build : passage **ANSI C → C99** |
+| `a2cc5a9` | `_POSIX_C_SOURCE` 199506 → 200112L (POSIX 2001) |
+| `7320527` | `#if 0` → `#ifdef RTK_DISABLED` (toggleable) |
+| `6c88804` | Refactor `.gitignore` par sous-dossier |
+
+→ **Recommandation** : si vous restez sur les Makefiles historiques, OK. Si votre équipe veut moderniser, CMake est mature **et inclut maintenant les tests unitaires** — gros levier pour votre stratégie doc-as-code + non-régression.
+
+### 11.11 Tests unitaires (`test/utest/`)
+
+| Commit | Description |
+|---|---|
+| `65cd81b` | **Tests unitaires activés** |
+| `5b7516d` | Fix printout tests |
+| `ffe4d49` | Tests existants intégrés CMake |
+| `14dd080` | Tests pour console apps (CMake) |
+
+→ Très utile pour votre `Δscore` de validation : vous pouvez ajouter des tests sur les patches du sprint 1, et l'infra CMake de tests est déjà disponible.
+
+### 11.12 Robustesse / threading (au-delà des OOB déjà listés en §6.3)
+
+| Commit | Description |
+|---|---|
+| `81c7df0` | `strtok` → **`strtok_r`** (thread-safe) |
+| `1aa29c9` | `gmtime_r` (thread-safe) |
+| `558048a` | `sbstropcorr` cache thread-safe |
+| `810fa5a` | `time_str` non-réentrant supprimé → `time2str` |
+| `5b023e9` | `time2str` : limite buffer 40 caractères |
+| `fec7f29` | `satno2id` : taille buffer cohérente |
+| `bf31bd6` | `scanf` : largeurs max strings |
+| `9d63cbb` | Misc UDP stream fixes |
+| `e194fd4` | NTRIP `rsp_ntripc` : check longueur basic auth |
+| `d23b208` | `openserial` macOS : OOB high baud rates |
+| `9e2dddf` | `openserial` : OOB potentiel `bs[]` |
+| `04525c3` | `writeserial` : patch non-WIN32 |
+| `94b9f68` | `decodeftppath` : null ptr deref |
+| `7098ab7` | `readmembuf` : wrap avant compare write ptr |
+
+### 11.13 Métadonnées et observations
+
+| Commit | Description |
+|---|---|
+| `907f29d` | **Indices fréquence BDS : B1C avant B2ab** (ordre des colonnes RINEX, attention parser) |
+| `ec7cf85` | Station info : ajout marker type, observer, agency (utile métadonnées) |
+| `e854997` | rtkrcv : commandes `mark` et `mode` (logs marqueurs) |
+
+### 11.14 Documentation — sample configs
+
+| Commit | Description |
+|---|---|
+| `d359e1b` | Update sample config files |
+| `702a6d0` | Exemple config u-blox F9P PPK |
+| `ec9a81b` | Updates documentation in/out code, suppression params obsolètes |
+
+### 11.15 Synthèse — angles à intégrer selon votre stack
+
+| Si vous… | Regardez en priorité |
+|---|---|
+| Utilisez u-blox X5 (et planifiez X20 plus tard) | §11.1 ublox + table X20 (`c671b39`) |
+| Avez du Septentrio en parc | §11.1 septentrio (~10 fixes en cascade) |
+| Convertissez du RTCM3 / RINEX 3.05+ | §11.2 + §11.3 (codes BeiDou modernes, GLO nav 3.05) |
+| Faites du PPP statique long-run | §11.4 tides IERS mean pole + VMF1 fixes |
+| Sortez du NMEA GST ou GGA avec refstationid | §11.6 |
+| Voulez moderniser le build (CMake + tests) | §11.10 + §11.11 |
+| Faites du multi-file post-process | §11.8 |
+| Tournez en multi-thread (rtkrcv) | §11.12 (strtok_r, gmtime_r, sbstropcorr cache) |
+
+---
+
+*Synthèse établie sur 1298 commits (805 hors merges) entre `6c53aa2` et `28ad77c`. Périmètre projet = CLI uniquement. Sections 1-6 = analyse et audits. Section 7 = sprint 1. Section 8 = NFREQ=4 plan. Section 9 = doc-as-code (Astro). Section 10 = optim latence/CPU/RAM. Section 11 = autres améliorations (parsers récepteurs, RTCM3 / RINEX 3.05, tides/IERS, NMEA, CMake, tests unitaires, robustesse threading).*
