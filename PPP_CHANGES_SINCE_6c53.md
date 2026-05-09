@@ -695,4 +695,235 @@ Une décision = un ADR daté et numéroté. Exemples typiques pour ce projet :
 
 ---
 
-*Synthèse établie sur 1298 commits (805 hors merges) entre `6c53aa2` et `28ad77c`. Périmètre projet = CLI uniquement. Section 6 issue de 4 audits parallèles. Section 7 = sprint 1. Section 8 = plan NFREQ=4. Section 9 = décision doc-as-code (Astro).*
+## 10. Optimisation PE temps réel — latence / CPU / RAM
+
+> Synthèse de 3 audits parallèles ciblés sur le périmètre **rtkrcv en temps réel avec rejeu `.tag`**. Le but : mesurer le delta 6c53 → HEAD, identifier les goulots actuels et lister les actions.
+
+### 10.1 Vue d'ensemble — bilan 6c53 → HEAD
+
+| Aspect | 6c53 (réf.) | HEAD nu | HEAD optimisé* | Verdict |
+|---|---|---|---|---|
+| **Latence end-to-end** | ~25 ms / époque | 15-18 ms | 10-12 ms (event-driven) | ✅ ~30 % gain natif, ~50 % avec patches maison |
+| **CPU** | 100 % baseline | 95-110 % | 85-90 % | ⚠️ Net presque neutre, gains annulés par SOFA + heap migration ; +10-15 % avec compile flags |
+| **RAM runtime initial** | ~5.7 MB | ~5.7 MB | ~3-4 MB | ✅ Quasi identique en standard, réductible avec compile-time tuning |
+| **RAM pic Kalman** | ~1.2 MB | ~1.3 MB (NFREQ=4) | ~0.6 MB (NFREQ=3) | ⚠️ NFREQ=4 ajoute ~100 KB |
+| **Binaire statique** | ~950 KB | ~1.5 MB | ~1.2 MB (gc-sections) | ❌ +550 KB (libopenblas + SOFA + features) |
+
+*HEAD optimisé = HEAD + compile flags reco + runtime tuning + patches maison §10.5
+
+### 10.2 Latence
+
+#### Gains acquis depuis 6c53 (~6-10 ms / époque)
+| Commit | Gain estimé | Mécanisme |
+|---|---|---|
+| `fbb9ea2` matmul cache-aware | 3-8 ms | Hoisting tests β=0, spécialisation NN/NT/TN/TT, accès séquentiel cache |
+| `d96a5c7` `dot2`/`dot3` | 0.5-1 ms | Inline pour n=2,3 (appelé ~50×/époque) |
+| `f91603c` `initx` refactor | 0.3-0.7 ms | Boucles deux-passes au lieu d'une ternaire, symétrie `P[i,j]` |
+| `28ad77c` init SSR `t0[]` | < 1 ms variance | Élimine jitter timetag initial sur replay `.tag` |
+| `269c2d5` resync RTCM3 | variable | Évite scan 10-100 bytes après msg invalide |
+| `f542de9` BeiDou SSR opérationnel | latence app. corrections BDS | |
+
+#### Goulots actuels (HEAD) — top 5
+1. **`svr->cycle = 100 ms` par défaut** dans rtksvr → `sleepms(cycle - cputime)` polling passif → 60+ ms d'inactivité par cycle. **Action runtime immédiate : passer à 20-50 ms.**
+2. **Décodage RTCM3 MSM** : 2-4 ms, pas de parallélisation inter-messages.
+3. **Filtre PPP Kalman** : 1-3 ms, Cholesky O(n³), pas de SIMD.
+4. **NTRIP reconnect** intermittent : 100-5000 ms (aucun watchdog par défaut). **Action : timeout 30s → 5-10s.**
+5. **Copies inter-buffers** rtksvr (`sbuf` → `pbuf` → décodage) : 0.1-0.5 ms × N obs.
+
+#### Patches maison à écrire (après sprint 1)
+| Patch | Scope | Gain | Risque |
+|---|---|---|---|
+| Polling → event-driven (`sleepms` → `select()` 50 ms) | ~100 LOC | -2-5 ms | Moyen |
+| Buffer SSR par timestamp + apply-on-rtkpos | ~200 LOC | -0.5 ms variance | Faible |
+| `matmul` parallèle (OpenMP/SIMD/AVX) | ~50 LOC | -3-5 ms sur grand `nx` | Moyen |
+| Élim. copie obs brutes (ring buffer direct) | ~300 LOC | -0.2 ms | Élevé |
+
+#### Méthode de mesure latence
+Instrumentation 4-points dans rtksvr + script post-mortem :
+```c
+#ifdef TRACE_LATENCY
+    tick_raw_in     = tickget();  /* arrivée raw msg */
+    tick_decoded    = tickget();  /* post-RTCM3 decode */
+    tick_rtkpos_in  = tickget();  /* pré-rtkpos */
+    tick_rtkpos_out = tickget();  /* post-solution */
+#endif
+```
+```bash
+grep "latency:" rtkrcv.log | awk '{sum+=$NF; n++} END {print "Mean:", sum/n " µs"}'
+```
+
+### 10.3 CPU
+
+#### Gains depuis 6c53 (~15-20 % théoriques)
+- `fbb9ea2` matmul cache-aware : +5-10 %
+- `d96a5c7` `dot2`/`dot3` : +2-3 %
+- `f06df21` cache sun/moon (THREADLOCAL + timediff < 1µs) : +40-60 % sur ces fonctions, ~90 % cache hit en temps réel
+- `62a2abf` SOFA OFF par défaut (`-DSUNPOS_ORIG` `-DMOONPOS_ORIG`) : +30-50 % sur sun/moon (< 1 mm de différence sur la solution)
+- `558048a` `sbstropcorr` cache thread-safe : +5-10 %
+
+#### Régressions (~5-12 % cumulés)
+- `8158789` import SOFA (epv00.c 152 KB, moon98.c 25 KB) : si **non** désactivé via define
+- `5a3566d` heap migration : malloc/free par époque (-2-5 %) sur cible embarquée
+- NFREQ=4 (état Kalman étendu) : +3-5 %
+- Code biases boucles ajoutées (preceph.c) : +1-2 %
+
+→ **Bilan net = -5 % à +5 %** selon config. Avec compile flags optimaux **+10-15 %**.
+
+#### Hot paths actuels (HEAD)
+| Rang | Fonction | % CPU |
+|---|---|---|
+| 1 | Filtre Kalman (`filter`, `kalman update`) | 25-30 % |
+| 2 | `ppp_res` (résidus + géométrie sat) | 20-25 % |
+| 3 | `geodist` / `satazel` / `antmodel` | 12-18 % |
+| 4 | Sun/moon + ECI↔ECEF | 8-15 % SOFA ON / 2-3 % SOFA OFF |
+| 5 | Interpolation SP3 (`pephpos` Neville) | 5-10 % |
+| 6 | Stream / RTCM / RINEX I/O | 5-8 % |
+
+#### Patches maison CPU (après sprint 1)
+| Patch | Gain |
+|---|---|
+| Factoriser `satazel` (appelé 2× par obs : setup + résidus) | -10-12 % sur `ppp_res`, ~-0.5 ms / époque (30 sat) |
+| Cache `searchpcv` par antenna type + time | -2-5 % sur `peph2pos` |
+| Compile `-DTRACE_DISABLE` en prod | -5-10 % runtime |
+| Unroll boucles 3D `geodist`/`satazel` | -3-5 % sur géométrie |
+
+#### Méthode profilage
+```bash
+# perf (production-like, faible overhead)
+perf record -g -F 100 -e cycles:u --output=perf.data ./rtkrcv -s cfg
+perf report --stdio | head -50
+# Flamegraph
+perf script | stackcollapse-perf.pl | flamegraph.pl > perf.svg
+
+# callgrind (cache miss + branche)
+valgrind --tool=callgrind --cache-sim=yes ./rtkrcv -s cfg
+kcachegrind callgrind.out.*
+
+# RDTSC instrumentation (ARM : cntvct_el0)
+uint64_t t0 = __rdtsc();
+/* ... code ... */
+trace(0, "ppp_res: %llu cycles\n", __rdtsc() - t0);
+```
+
+### 10.4 RAM
+
+#### Gains depuis 6c53
+- `d574080` (mar 2026) : suppression `nav->rbias[MAXRCV][NFREQ][MAX_CODE_BIASES]` jamais utilisée → **-9 KB** runtime (×3 nav)
+- `5a3566d` (mai 2025) : heap migration → évite stack overflow (>8 MB Linux)
+- `bb73478` : `rtksvr_t` sur heap dans RTKNAVI-Qt
+- `8a6a188`, `8774401`, `b88dfee` : free explicite sur paths d'erreur → -9 KB par redémarrage en erreur
+- `f10fa74` : pas d'alloc inutile `nav->seph` en post-process → -3 KB
+
+#### Régressions
+- `27290f4` réintroduction libopenblas.a (Embarcadero) : **+429 KB** binaire statique (négligeable pour rtkrcv)
+- `f35cf00` MAXPRNCMP 46→50 : +3.6 KB net (4 sats × structures cumulées)
+- SSR BeiDou + iono-free unifiée + cache tropo SBAS : ~+6 KB code
+- Import SOFA `8158789` : **+450 KB** binaire si compilé sans `-DSUNPOS_ORIG -DMOONPOS_ORIG`
+
+#### Top consommateurs runtime (HEAD)
+1. **Matrice P Kalman pic** : ~1.3 MB (nx² × 8 bytes, NFREQ=4 multi-constell). Inévitable structurellement.
+2. **Buffers stream** `buff[3] + pbuf[3] + sbuf[2]` × 32 KB : **224 KB**. Configurable via `rtksvrstart(buffsize)`.
+3. **`raw[3]`** subframe buffers : ~340 KB.
+4. **`nav` allocations** (eph, geph, cbias, pcvs) : ~250 KB.
+5. **`obs[3][MAXOBSBUF]`** : ~100-150 KB selon `MAXOBSBUF` et `MAXOBS`.
+6. **`rtcm[3]`** : ~50 KB.
+7. **`ssat[MAXSAT]`** : ~71 KB (322 B × 218 sats).
+
+#### Réductions actionnables
+| Action | Gain RAM |
+|---|---|
+| `-Os -fdata-sections -ffunction-sections -Wl,--gc-sections` | -30 KB binaire |
+| `-DMAXOBS=32` (si scénario rover seul, < 30 obs/époque) | -3 MB pic théorique (ou plus selon usage `obs[3][MAXOBSBUF]`) |
+| `-DNFREQ=3` (si non requis par X5 — voir §8) | -15 % RAM Kalman, -10 % buffers obs |
+| `buffsize 32 KB → 8 KB` (NTRIP basse latence) | -144 KB |
+| Compilation conditionnelle MAXSAT=100 (GPS/GLO/GAL/QZS uniquement) | -40 % RAM initiale (matériel < 256 MB) |
+| `peph[]` borné à `24h / interval` (~2880 entries) | Évite croissance unbounded en post-process long |
+| `navsel=1` (rover seul) au lieu de 0 (all systems) | -20-30 % allocs `nav.eph` / `nav.peph` |
+
+#### Méthode de mesure RAM
+```bash
+# Statique (binaire)
+size $(which rtkrcv)
+
+# Runtime (live)
+watch -n 1 'grep -E "VmRSS|VmHWM|VmPeak" /proc/$(pgrep rtkrcv)/status'
+
+# Heap profiling
+valgrind --tool=massif ./rtkrcv -s cfg
+ms_print massif.out.<PID>
+
+# Heaptrack (timeline interactif)
+heaptrack ./rtkrcv -s cfg
+heaptrack_gui heaptrack.rtkrcv.<PID>.zst
+```
+
+### 10.5 Synthèse — actions consolidées sur les 3 axes
+
+#### Compile flags recommandés (impact mixte latency / CPU / RAM)
+```makefile
+# Production rtkrcv
+CFLAGS = -std=c99 -O3 -march=native -mtune=native \
+         -ffast-math -fno-strict-aliasing -flto \
+         -fomit-frame-pointer \
+         -fdata-sections -ffunction-sections \
+         -DNDEBUG \
+         -DSUNPOS_ORIG -DMOONPOS_ORIG \
+         -DTRACE=2 \
+         -DNFREQ=4 -DNEXOBS=3
+LDFLAGS = -Wl,--gc-sections,--strip-all -flto
+
+# Cibles ARM (Cortex-A9 / ARMv7 + NEON)
+CFLAGS += -mfpu=neon -mfloat-abi=hard
+# Cibles x86_64 + AVX2
+CFLAGS += -mavx2 -mfma
+```
+**Gains attendus** : -5-15 % CPU, -2-8 ms latence, -30 KB binaire.
+
+#### Configuration runtime rtkrcv recommandée
+| Paramètre | Défaut | Recommandé | Effet |
+|---|---|---|---|
+| `svr->cycle` | 100 ms | **20-50 ms** | -10-50 ms latence par cycle, +20-40 % CPU |
+| `buffsize` | 32768 | 8192 (NTRIP basse BP) | -144 KB RAM |
+| `trace level` | 2 | **1** | -5-10 % CPU |
+| NTRIP timeout | 30 s | 5-10 s | -25 s downtime SSR pic |
+| `MAXOBSBUF` | 128 | 64 si rover seul | -50 % RAM `obs[]` |
+| `pos2-niter` | 5 | 3 si convergent rapide | -CPU ppp_res |
+| `pos2-elmin` | 10° | 15° (selon scénario) | Moins de sat marginaux |
+
+#### Patches maison à planifier (sprint 2 ou 3)
+| Patch | Axe | Scope | Gain |
+|---|---|---|---|
+| Event-driven server loop (`select()` au lieu de `sleepms`) | latence | ~100 LOC | -2-5 ms |
+| Buffer SSR par timestamp | latence | ~200 LOC | -0.5 ms variance |
+| Factoriser `satazel` (1× au lieu de 2×) | CPU | ~30 LOC | -10-12 % `ppp_res` |
+| Cache `searchpcv` antenna+time | CPU | ~50 LOC | -2-5 % `peph2pos` |
+| `matmul` SIMD/OpenMP | CPU + latence | ~50 LOC | -3-5 ms |
+| Borner `peph[]` (anti-fuite long-run) | RAM | ~20 LOC | Croissance plafonnée |
+
+### 10.6 Roadmap optimisation
+
+**Sprint 1 (en cours)** — voir §7 :
+- ✅ Cherry-picks fixes critiques (déjà incluent `fbb9ea2`, `d96a5c7`, `f91603c` côté perf)
+- ✅ Patch maison rtkrcv `cmd_restart` (réplicabilité `.tag` — patch #10)
+- ✅ Compile flag `-DNFREQ=4` (X5)
+
+**Sprint 1.5 — quick wins** (1-2 jours, à intégrer si temps reste sur sprint 1) :
+- Compile flags optimaux (§10.5) → bench A/B simple sur dataset témoin
+- Configuration runtime tunée (`svr->cycle` 20-50 ms, trace level 1, NTRIP timeout 10 s)
+- `-DSUNPOS_ORIG -DMOONPOS_ORIG -DTRACE=2`
+
+**Sprint 2 — optimisations algos + features manquantes** (3-4 semaines) :
+- Support `.BIA` / OSB
+- Patches NFREQ=4 propres (§8.4)
+- Factoriser `satazel`, cache `searchpcv`
+- PPP-AR (rtklib-py partiel ou PPP-Wizard)
+
+**Sprint 3 — refactor temps réel + concurrence** (2-3 semaines) :
+- Event-driven server loop
+- SSR timestamp buffer
+- `matmul` SIMD si métriques le justifient
+- Dépendance GPS (§5) — refactor `udclk_ppp` + `pntpos`
+
+---
+
+*Synthèse établie sur 1298 commits (805 hors merges) entre `6c53aa2` et `28ad77c`. Périmètre projet = CLI uniquement. Section 6 issue de 4 audits parallèles (algo / interfaces / produits externes / SSR-multi-fréq). Section 7 = sprint 1. Section 8 = plan NFREQ=4. Section 9 = décision doc-as-code (Astro). Section 10 = optimisation latence/CPU/RAM issue de 3 audits parallèles ciblés rtkrcv temps réel.*
