@@ -295,22 +295,20 @@ Aucune PR ouverte sur `rtklibexplorer/RTKLIB` n'aborde ce sujet à date d'analys
 
 > Issues non encore traitées en upstream, identifiées par audit ciblé du code à `HEAD` (`28ad77c`). 57 problèmes recensés, regroupés par thème. Méthodologie : 4 agents d'analyse en parallèle sur (a) cœur PPP, (b) interfaces, (c) parsers produits externes, (d) SSR/temps réel/multi-fréq.
 
-### 6.1 🔴 Théme transversal n°1 — `NFREQ=4` partiellement appliqué
+### 6.1 🟠 Théme transversal n°1 — `NFREQ>3` partiellement appliqué
 
-Le passage à 4 fréquences (`199be2b`, avr. 2025) n'a pas propagé partout. Plusieurs structures et boucles restent hardcodées à 3.
+Le passage à 4+ fréquences (`199be2b`, avr. 2025) n'a pas propagé partout. Plusieurs structures et boucles restent hardcodées à 3.
+
+> **CORRECTION post-relecture** : `ssr_t.deph[3]` / `ddeph[3]` / `dclk[3]` représentent les composantes radial/along/cross de l'orbite et le polynôme c0/c1/c2 de l'horloge — **PAS des indices de fréquence**. Les corrections SSR1 (orbite) et SSR2 (horloge) sont **scalaires par satellite** et s'appliquent à toutes les fréquences. Les biais SSR3 (code) et SSR7 (phase) sont par signal-code via `cbias[MAXCODE]` / `pbias[MAXCODE]`, couvrant tous les signaux Mosaic X5. **Donc NFREQ>3 ne dégrade PAS la couverture SSR**, contrairement à ce qui était indiqué dans une version antérieure de cette section.
 
 | Sévérité | Fichier:ligne | Problème |
 |---|---|---|
-| 🔴 | `src/rtklib.h:834-836` | Structure `ssr_t` : `deph[3]`, `ddeph[3]`, `dclk[3]` figés à 3 → corrections orbit/clock SSR pour la 4ᵉ fréq impossibles. |
-| 🔴 | `src/rtcm3.c:1629-1638, 1674-1695, 1710-1725` | Boucles `for (k=0;k<3;k++)` dans `decode_ssr1/2/3` → la 4ᵉ correction n'est jamais lue même si présente. |
-| 🔴 | `src/rtkcmn.c:3744` (`seliflc`) | `return((optnf==2\|\|sys==SYS_GLO)?1:2)` — pas de cas `nf≥4`, retourne toujours indice ≤2 → la 4ᵉ fréq n'est jamais utilisée en iono-free. |
-| 🟠 | `src/ppp.c:754` | Cycle-slip iono-free hardcodé à `slip[0] \|\| slip[1]` — slips sur freq 2,3 invisibles pour les biais iono-free. |
-| 🟠 | `src/ppp.c:385-406` | `gfmeas` / `mwmeas` n'utilisent que `code[0]`/`code[1]` → cycle-slip GF/MW jamais détecté sur freq 2,3. |
-| 🟠 | `src/ppp.c:368-369` | `obs->Pstd[frq]` / `Lstd[frq]` accédé sans guard `frq < NFREQ` → OOB potentiel si récepteur fournit 5+ fréquences. |
-| 🟠 | `src/ppp.c:1162` | `test_hold_amb` ne teste que `fix[0]` et `fix[1]` → fix-and-hold sur freq 2,3 jamais validé. |
-| 🟠 | `src/rtklib.h:874` | `cbias[MAXSAT][NFREQ][MAX_CODE_BIASES]` alloué mais SSR remplit `pbias[MAXCODE]` plat → mismatch d'indexation. |
-
-**Impact global** : utiliser `NFREQ=4` sur `HEAD` donne une expérience **partielle** — la 4ᵉ fréq est consommée par certains modules et ignorée par d'autres.
+| 🟠 | `src/rtkcmn.c:3744` (`seliflc`) | Retourne au max 2 — la 4ᵉ-6ᵉ fréq n'est jamais sélectionnée pour iono-free → uniquement freq 0+f2 où f2 ≤ 2 |
+| 🟠 | `src/ppp.c:754` | Cycle-slip iono-free hardcodé à `slip[0] \|\| slip[1]` — slips sur freq 2-5 invisibles pour les biais iono-free |
+| 🟠 | `src/ppp.c:385-406` | `gfmeas` / `mwmeas` n'utilisent que `code[0]`/`code[1]` → cycle-slip GF/MW jamais détecté sur freq 2-5 (LLI seul reste) |
+| 🟠 | `src/ppp.c:368-369` | `obs->Pstd[frq]` / `Lstd[frq]` accédé sans guard `frq < NFREQ` → OOB potentiel si récepteur fournit > NFREQ stdevs |
+| 🟠 | `src/ppp.c:1162` | `test_hold_amb` ne teste que `fix[0]` et `fix[1]` → fix-and-hold sur freq 2-5 jamais validé (pertinent quand PPP-AR sera en place) |
+| 🟡 | `src/ppp.c:372` | Facteur iono-free `SQR(3.0)` valide pour GPS L1/L2 uniquement |
 
 ### 6.2 🔴 Théme transversal n°2 — Variances et facteurs hardcodés GPS-only
 
@@ -435,7 +433,7 @@ dtr = (i == ref_sys)
 | **10** | 🟠 | **patch maison** (cf. §7.7) | `app/consapp/rtkrcv/rtkrcv.c` | ~3 | **Reproductibilité `restart` rtkrcv** : ajouter `rtksvrinit(&svr)` dans `cmd_restart` entre `stopsvr` et `startsvr` | *"Garantit qu'un rejeu via `restart` produit le même résultat — critique pour notre validation."* |
 | **11** | 🟠 | `569197d` | `rtkrcv.c` | ~10 | `prstatus` rempli pour 5 à 7 fréquences | *"Nécessaire avec `NFREQ=4` : sans ça notre `.stat` parser voit des champs vides ou tronqués."* |
 | **12** | 🟡 | `9c9ec53` | `options.c` + apps | ~50 | Rework des position options | *"Cohérence config rcv. Vérifier que nos `.conf` chargent toujours sans warning."* |
-| **13** | 🟢 | **flag compil** | Makefile | 0 | `-DNFREQ=4` (pour Mosaic X5 multi-fréq, étape vers NFREQ=6 en sprint 2) | *"Active 4 fréquences X5 — voir §8 pour limitations connues."* |
+| **13** | 🟢 | **flags compil CM5** | Makefile | 0 | `-DNFREQ=5 -mcpu=cortex-a76 -O3 -flto -ffast-math -DSUNPOS_ORIG -DMOONPOS_ORIG -DTRACE=2` (cf. §10.6) | *"NFREQ=5 capture B1C BDS-3 + E6 Galileo — étape vers NFREQ=6 en sprint 2. Flags Cortex-A76 ciblent le CM5 production."* |
 | **14** | 🔴 | **cluster Septentrio** : `670690a` + `784056a` + `253bfb3` + `26ed828` + `79991f2` | `src/rcv/septentrio.c` | ~250 | Refonte parser SBF (buffer par époque + commit fin d'époque) + flush début lecture + multi-stream thread-safe + fix rejeu | *"Mosaic X5 = notre récepteur. Sans ce cluster on perd des observations en streaming et on a des datasets incohérents au rejeu `.tag`. Cohérent à prendre en bloc."* |
 | **15** | 🟠 | Septentrio annexes : `d2c94b3` + `431ec5a` + `682d64b` + `8080af0` + `62d2b69` | `src/rcv/septentrio.c` | ~80 | RCVSTDS option + GLO unaligned access + SBAS sbslongcorrh + UTC BDS CNAV + GPS raw cnav | *"Compléments du cluster #14 — qualité/pondération obs et fixes de décodage spécifiques signaux Mosaic."* |
 
@@ -582,66 +580,118 @@ rtkrcv -m start_replay.cmd > run2.pos && md5sum run2.pos
 - Sortie `.pos` standard (positions identiques avec/sans `NFREQ=4` si on n'utilise pas la 4ᵉ freq dans le filtre).
 - Sortie `.stat` colonnes 5-7 freqs renseignées **après cherry-pick `569197d`** (patch #11).
 
-### 8.2 ⚠️ Ce qui ne marche pas / partiellement
+### 8.2 Cartographie freq slot par constellation (Mosaic X5)
 
-| Sévérité | Problème | Fichier:ligne | Effet sur PPP X5 |
-|---|---|---|---|
-| 🔴 | `seliflc()` retourne au max 2 — la 4ᵉ fréq n'est **jamais** sélectionnée pour iono-free | `rtkcmn.c:3744` | iono-free PPP n'utilise que freq 0+f2 où f2 ≤ 2 → la fréq 3 est ignorée pour la combinaison principale |
-| 🔴 | `gfmeas()` / `mwmeas()` n'utilisent que `obs->code[0]` et `[1]` | `ppp.c:385-406` | Cycle-slip GF / Melbourne-Wubbena uniquement entre freq 0 et 1 → cycle-slip sur freq 2 ou 3 invisible (LLI seul) |
-| 🔴 | `ssr_t.deph[3]`, `ddeph[3]`, `dclk[3]` figés à 3 | `rtklib.h:834-836` | Corrections SSR orbit/clock pour la 4ᵉ fréq impossibles → si SSR utilisé en temps réel, la freq 3 n'a pas de correction précise |
-| 🔴 | Boucles `for (k=0;k<3;k++)` dans decode SSR1/2/3 | `rtcm3.c:1629-1638, 1674-1695, 1710-1725` | Conséquence directe du point précédent côté décodeur |
-| 🟠 | `EFACT_GPS_L5` seul existe, pas d'`EFACT_GAL_L5` ni `EFACT_CMP_L5` etc. | `ppp.c:355-357` | Variance L5/E5a/B2a sous-estimée pour non-GPS → poids trop fort en filtre |
-| 🟠 | `obs->Pstd[frq]` / `Lstd[frq]` accédés sans guard `frq<NFREQ` | `ppp.c:368-369` | Si récepteur fournit > NFREQ stdevs : OOB. Pour NFREQ=4 c'est OK pour X5 mais à surveiller |
-| 🟠 | `test_hold_amb()` ne teste que `fix[0]` et `fix[1]` | `ppp.c:1162` | Fix-and-hold sur freq 2,3 jamais validé (impact si PPP-AR un jour) |
-| 🟠 | Slip iono-free hardcodé à `slip[0] \|\| slip[1]` | `ppp.c:754` | Slip sur freq 2 ou 3 ne réinitialise pas le biais iono-free |
-| 🟡 | Facteur iono-free `SQR(3.0)` valide pour GPS L1/L2 uniquement | `ppp.c:372` | Variance iono-free fausse si combinaison utilise des fréquences proches (ex: E1/E5b) |
+Vue d'ensemble lue dans `src/rtkcmn.c:611-706` (`code2freq_*`). **Le mapping détermine quelles fréquences sont accessibles à NFREQ donné** :
 
-### 8.3 Conséquence pratique pour vos runs PPP Mosaic X5
-
-| Scénario | NFREQ=3 | NFREQ=4 | NFREQ=6 | Commentaire |
-|---|---|---|---|---|
-| SPP / standalone | ✅ 3 freqs | ✅ 4 freqs | ✅ 6 freqs | Gain direct par fréq supplémentaire |
-| PPP iono-free L1/L2 classique | ✅ | ✅ | ✅ | Inchangé, freqs >2 ignorées |
-| PPP iono-free GPS+GAL+BDS multi-constell | 🟡 | 🟡 | 🟡 | Variances faux pour non-GPS, converge quand même |
-| PPP exploitant E1/E5a + E1/E5b + E1/E6 simultanément | ❌ | ❌ | ❌ | `seliflc` ne sélectionne qu'une paire à la fois |
-| PPP temps réel + SSR sur freqs ≥3 | ❌ | ❌ | ❌ | `ssr_t.deph[3]/dclk[3]` figé à 3 — **gros gap pour Mosaic X5 multi-fréq** |
-| Détection cycle-slip robuste sur freqs ≥2 | ❌ | ❌ | ❌ | LLI uniquement (Septentrio LLI fiable, donc OK en pratique) |
-| PPP-fixed (AR) | ❌ | ❌ | ❌ | `ppp_ar.c` vide de toute façon |
-
-#### Choix NFREQ pour le projet
-
-| Option | Avantages | Risques |
+#### Galileo (5 signaux Mosaic X5)
+| Slot | Signal | Acquis si NFREQ ≥ |
 |---|---|---|
-| **`NFREQ=4`** (sprint 1) | Compromis : 4 fréqs disponibles, audit identifie peu de cas critique | Laisse de côté E5-AltBOC, E6, B2b, B3I sur Mosaic X5 |
-| **`NFREQ=6`** (sprint 2) | Exploite tout le Mosaic X5 | Aggravation des bugs §6.1 (`ssr_t[3]`, `seliflc≤2`, `gfmeas` freq[0,1]) → patches §8.4 deviennent prérequis |
+| 0 | E1 | 1 |
+| 1 | **E5b** ⚠️ (E5b avant E5a) | 2 |
+| 2 | E5a | 3 |
+| 3 | E6 | 4 |
+| 4 | E5-AltBOC (codes L8I/L8Q/L8X) | 5 |
 
-**Recommandation actuelle** : `NFREQ=4` au sprint 1 (cohérent avec patch #11 `569197d` qui ouvre `prstatus` à 5-7 freqs), passage à `NFREQ=6` au sprint 2 **après** patches §8.4. Ne pas sauter cette étape — `NFREQ=6` direct sur HEAD sans les patches expose des comportements imprévisibles sur les 4ᵉ-6ᵉ fréquences.
+#### BeiDou (6 signaux Mosaic X5)
+| Slot | Signal | Acquis si NFREQ ≥ |
+|---|---|---|
+| 0 | B1I (legacy) | 1 |
+| 1 | B2I / B2b | 2 |
+| 2 | B2a | 3 |
+| 3 | B3I | 4 |
+| 4 | **B1C** ⚠️ (commit `35dfb17` a déplacé B1C de slot 1 à slot 4 pour éviter conflit avec B2I) | 5 |
+| 5 | B2ab | 6 |
 
-### 8.4 Sprint 2 — patches à écrire pour rendre NFREQ=4 propre
+→ **`NFREQ=4` rate B1C** — code dominant en BDS-3. Pour PPP BeiDou-3 propre, **`NFREQ≥5`**. Alternative : changer `pos1-codepri-...` pour forcer B1C en slot 0.
 
-Estimation à partir de l'audit. Aucun de ces patches n'existe upstream — c'est du dev maison.
+#### GLONASS (3 freqs legacy + G1a/G2a CDMA gen3)
+| Slot | Signal |
+|---|---|
+| 0 | G1 (incl. G1a CDMA via codes L4*) |
+| 1 | G2 (incl. G2a CDMA) |
+| 2 | G3 |
+
+#### GPS (3 freqs)
+- L1 / L2 / L5 → NFREQ=3 suffit
+
+#### QZSS (4 freqs)
+- L1 / L2 / L5 / L6 → NFREQ=4 nécessaire pour L6
+
+### 8.3 Ce qui ne marche pas / partiellement avec NFREQ>3
+
+| Sévérité | Problème | Fichier:ligne | Effet PPP Mosaic X5 |
+|---|---|---|---|
+| 🟠 | `seliflc()` retourne au max 2 | `rtkcmn.c:3744` | iono-free PPP n'utilise que freq 0+f2 (f2 ≤ 2) → freqs ≥3 ignorées pour combinaison principale |
+| 🟠 | `gfmeas()` / `mwmeas()` n'utilisent que `code[0]` et `code[1]` | `ppp.c:385-406` | Cycle-slip GF / Melbourne-Wubbena uniquement entre freq 0,1 → cycle-slip freq 2-5 via LLI seul |
+| 🟠 | `EFACT_GPS_L5` seul existe (pas `EFACT_GAL_L5` etc.) | `ppp.c:355-357` | Variance L5/E5a/B2a sous-estimée pour non-GPS → poids trop fort en filtre |
+| 🟠 | `obs->Pstd[frq]` / `Lstd[frq]` accédés sans guard | `ppp.c:368-369` | OOB potentiel si récepteur fournit > NFREQ stdevs |
+| 🟠 | `test_hold_amb()` ne teste que `fix[0]` et `fix[1]` | `ppp.c:1162` | Fix-and-hold sur freq 2-5 jamais validé (impact PPP-AR futur) |
+| 🟠 | Slip iono-free hardcodé `slip[0] \|\| slip[1]` | `ppp.c:754` | Slip freq 2-5 ne réinit pas biais iono-free |
+| 🟡 | Facteur iono-free `SQR(3.0)` valide pour GPS L1/L2 uniquement | `ppp.c:372` | Variance iono-free légèrement biaisée pour combinaisons E1/E5x ou B1/B2x |
+| 🟡 | DCB L5 (`uddcb_ppp`) seul biais récepteur estimé | `ppp.c:819-821` | NFREQ≥4 nécessite des biais récepteur additionnels (DCB E5b, E6, B1C, B3) — actuellement absorbés dans les ambiguïtés |
+
+> ⚠️ **Note SSR clarifiée** : `ssr_t.deph[3]/ddeph[3]/dclk[3]` sont des composantes RAC + polynôme C0/C1/C2 — **pas des indices de fréquence**. Les corrections SSR orbit/clock sont scalaires par satellite et s'appliquent à toutes les fréquences. Les biais SSR3 (code) et SSR7 (phase) sont indexés par signal-code (`MAXCODE=70`), couvrant tous les signaux Mosaic X5.
+
+### 8.4 Choix NFREQ pour le projet — analyse coût/bénéfice
+
+| NFREQ | Mosaic X5 manqué | Verdict |
+|---|---|---|
+| 3 (défaut RTKLIB) | E5b/E5a/E6 GAL, B2a/B3/B1C BDS, L6 QZS | Vieille config, sous-exploite massivement |
+| 4 | **B1C BDS-3**, E5-AltBOC GAL, L6 QZS, G1a/G2a GLO | Trade-off : pas de B1C → sous-exploite BDS-3 modernes |
+| **5** ✅ | B2ab BDS, G2a GLO | **Recommandé** — capture B1C + B2a + B3 + B1I pour BDS, E1+E5b+E5a+E6 pour Galileo |
+| 6 (= MAXFREQ) | — | Maximum, exploite AltBOC GAL et B2ab BDS |
+
+**Recommandation révisée** :
+
+- **Sprint 1 : `NFREQ=5`** (et non 4 comme précédemment) — capture B1C BeiDou-3 et E6 Galileo, frontière où les bugs §8.3 commencent à mordre mais sans aller à l'extrême
+- **Sprint 2 : `NFREQ=6`** uniquement après patches §8.5 (extension `seliflc`, `gfmeas`/`mwmeas` paramétrés, `EFACT_*_L5` par constellation)
+
+**Pourquoi pas NFREQ=4** :
+- B1C est le code BDS-3 dominant — toute station IGS récente émet B1C, tous les produits SSR le couvrent
+- L'écart entre NFREQ=4 et NFREQ=5 est faible en RAM (+~3 KB) et CPU (+~2 % filtre Kalman)
+- Patch #11 (`569197d`) ouvre déjà `prstatus` à 5-7 freqs
+
+**Conséquence pratique par scénario** :
+| Scénario | NFREQ=3 | NFREQ=4 | **NFREQ=5** | NFREQ=6 |
+|---|---|---|---|---|
+| SPP / standalone | ✅ 3 freqs | ✅ 4 | ✅ 5 | ✅ 6 |
+| PPP iono-free L1/L2 GPS classique | ✅ | ✅ | ✅ | ✅ |
+| PPP iono-free GPS+GAL+BDS-3 multi-constell | 🟡 | 🟡 (sans B1C) | ✅ | ✅ |
+| PPP exploitant E1/E5a + E1/E5b simultané | ❌ `seliflc` | ❌ | ❌ | ❌ |
+| PPP temps réel + SSR | ✅ | ✅ | ✅ | ✅ (clarifié — voir §8.3) |
+| Cycle-slip robuste freqs ≥2 | LLI seul | idem | idem | idem |
+| PPP-fixed (AR) | ❌ | ❌ | ❌ | ❌ (`ppp_ar.c` vide) |
+
+⚠️ **Alternative à explorer** : modifier `code2freq_BDS` pour mettre B1C en slot 0 ou 2 (pré-empte B1I/B2a). Évite la dépendance à NFREQ=5+. ~5 lignes mais modifie l'ordre des colonnes RINEX → impact parsers `.stat` aval. Décision projet.
+
+### 8.5 Sprint 2 — patches à écrire pour rendre NFREQ≥5 propre
+
+Estimation à partir de l'audit corrigé. Aucun de ces patches n'existe upstream — c'est du dev maison. **Le patch n°4 (ssr_t) est retiré** : analyse approfondie a montré que `ssr_t.deph[3]` n'est pas lié aux fréquences (composantes RAC/clock).
 
 | Tâche | Effort estimé | Fichiers | Description |
 |---|---|---|---|
-| 1. Étendre `seliflc()` pour `nf≥4` | ½ jour | `rtkcmn.c` | Choix dynamique freq2 selon système (E1/E5b ou E1/E5a pour Galileo, B1C/B2a pour BeiDou) |
-| 2. Paramétrer `gfmeas`/`mwmeas` | 1 jour | `ppp.c` | Boucle sur paires (0, f2) avec f2 ∈ {1, 2, 3} si dispos |
-| 3. `EFACT_*_L5` par constellation | ½ jour | `ppp.c`, `rtklib.h` | Ajouter `EFACT_GAL_L5`, `EFACT_CMP_L5`, `EFACT_IRN_L5` (valeurs par défaut 5.0) |
-| 4. Élargir `ssr_t.deph/ddeph/dclk` à `[NFREQ]` ou `[MAXFREQ]` | 1 jour | `rtklib.h`, `rtcm3.c`, `rtkcmn.c` | Refactor structure + boucles décodage SSR1/2/3 |
-| 5. Facteur iono-free dynamique | ½ jour | `ppp.c:372` | Calculer `SQR(f1/(f1-f2))` selon les fréquences réelles utilisées |
-| 6. Slip iono-free utilisant `f2` dynamique | ½ jour | `ppp.c:754` | Référencer `slip[seliflc(nf,sys)]` au lieu de `slip[1]` |
-| 7. `test_hold_amb` boucle sur toutes freqs | ¼ jour | `ppp.c:1162` | Boucle `for (f=0; f<opt->nf; f++)` |
-| 8. Guards `obs->Pstd[frq]` / `Lstd[frq]` | ¼ jour | `ppp.c:368-369` | `if (frq < NFREQ)` avant accès |
+| 1. Étendre `seliflc()` pour `nf≥4` | ½ jour | `rtkcmn.c:3744` | Choix dynamique freq2 selon système et NFREQ |
+| 2. Paramétrer `gfmeas`/`mwmeas` | 1 jour | `ppp.c:385-406` | Boucle sur paires (0, f2) avec f2 ∈ {1, 2, …, nf-1} |
+| 3. `EFACT_*_L5` par constellation | ½ jour | `ppp.c:355-357` + `rtklib.h` | Ajouter `EFACT_GAL_L5`, `EFACT_CMP_L5`, `EFACT_IRN_L5` |
+| 4. Facteur iono-free dynamique | ½ jour | `ppp.c:372` | Calculer `SQR(f1/(f1-f2))` selon paire réelle |
+| 5. Slip iono-free utilisant `f2` dynamique | ½ jour | `ppp.c:754` | Référencer `slip[seliflc(nf,sys)]` |
+| 6. `test_hold_amb` boucle sur toutes freqs | ¼ jour | `ppp.c:1162` | `for (f=0; f<opt->nf; f++)` |
+| 7. Guards `obs->Pstd[frq]` / `Lstd[frq]` | ¼ jour | `ppp.c:368-369` | `if (frq < NFREQ)` avant accès |
+| 8. **DCB récepteur étendu** (E5b, E6, B1C, B3) | 1-2 jours | `ppp.c:819-821`, `rtklib.h` | Estimer 1 DCB par freq>2 (ou par paire avec freq 0). Sans cela les biais récepteur sont absorbés par les ambiguïtés et la convergence est lente |
 
-**Total sprint 2 spécifique NFREQ=4** : ~4-5 jours. À combiner avec support `.BIA` + PPP-AR pour un sprint 2 complet de ~3-4 semaines.
+**Total sprint 2 spécifique NFREQ≥5** : ~4-5 jours. Combiner avec support `.BIA` + PPP-AR pour un sprint 2 complet ~3-4 semaines.
 
-### 8.5 Validation Mosaic X5 spécifique
+### 8.6 Validation Mosaic X5 spécifique
 
 Tests à ajouter au harness :
-- Compter le nombre d'observations `freq[3]` (et `freq[4]`, `freq[5]` si NFREQ=6) dans `.stat` (proxy : présence de SNR colonnes 5+)
-- Vérifier que les positions PPP en mode iono-free L1/L2 sont **identiques** entre `NFREQ=3` et `NFREQ=4` (les fréqs ≥3 ne doivent pas dégrader la solution sur les modes existants)
+- Compter le nombre d'observations `freq[3]`, `freq[4]` (et `freq[5]` si NFREQ=6) dans `.stat` (proxy : SNR colonnes 5+)
+- Vérifier que **B1C est bien observé** (NFREQ ≥ 5) : `grep "C2I.*C1P\|C1P" .stat` ou inspection des codes RINEX `*.obs` (signal `C1P` = B1C BDS)
+- Vérifier que les positions PPP en mode iono-free L1/L2 sont **identiques** entre `NFREQ=3`, `4`, `5` (les fréqs ≥3 ne doivent pas dégrader la solution sur les modes existants)
 - Tracer (`.trace` level 3+) la sélection `seliflc` pour confirmer le comportement attendu
 - Mesurer le gain SPP avec/sans fréqs supplémentaires sur scénarios à faible visibilité
-- **Spécifique Mosaic X5** : vérifier que les SBF MeasEpoch + EndOfMeas reçus sur 4-6 fréqs sont bien décodés sur `670690a` + `784056a` cluster (sinon perte d'observations sur certains signaux Galileo E5-AltBOC / E6 / BeiDou B2b)
+- **Spécifique Mosaic X5** : vérifier que les SBF MeasEpoch + EndOfMeas reçus sur 5-6 fréqs sont bien décodés sur `670690a` + `784056a` cluster (sinon perte d'observations sur signaux modernes BDS-3 / Galileo)
+- **Test convergence BDS-3 only** : forcer config `pos1-navsys=2` (BDS seul) avec NFREQ=4 vs 5 → différence visible si B1C absent
 
 ---
 
@@ -910,7 +960,92 @@ CFLAGS += -mavx2 -mfma
 | `matmul` SIMD/OpenMP | CPU + latence | ~50 LOC | -3-5 ms |
 | Borner `peph[]` (anti-fuite long-run) | RAM | ~20 LOC | Croissance plafonnée |
 
-### 10.6 Roadmap optimisation
+### 10.6 Cible build : Raspberry Pi Compute Module 5 (CM5)
+
+> Cible projet : **CM5** (Broadcom BCM2712, 4× ARM Cortex-A76 ARMv8.2-A @ 2.4 GHz, NEON, 4-16 GB LPDDR4X).
+
+#### Profil ARMv8.2-A vs ARMv7 (ce que ça change)
+
+| Aspect | ARMv7 (Pi 3 / older) | ARMv8.2-A AArch64 (CM5) |
+|---|---|---|
+| Strict alignment | Strict sur load/store génériques | Permissif sauf LDP/STP/atomics/NEON spécifiques |
+| `431ec5a` GLO subframe unaligned | **Bloquant** (segfault) | Non bloquant en pratique mais à prendre quand même (instructions vectorisées peuvent fauter) |
+| NEON | Optionnel | Obligatoire (intégré ISA) |
+| FP16 | Optionnel | Présent sur Cortex-A76 |
+| Pointeurs | 32-bit | 64-bit (impact taille structures) |
+| Atomic | LDREX/STREX | LDADD/CAS plus efficaces |
+| LSE atomics | Non | Oui (Cortex-A76 supporte) |
+
+#### Recette compile CM5 (production rtkrcv)
+
+```makefile
+# CM5 — Cortex-A76 production
+CC = gcc
+CFLAGS = -std=c99 -O3 \
+         -mcpu=cortex-a76 -mtune=cortex-a76 \
+         -march=armv8.2-a+crc+crypto+fp16 \
+         -ffast-math -fno-strict-aliasing -flto \
+         -fomit-frame-pointer \
+         -fdata-sections -ffunction-sections \
+         -DNDEBUG \
+         -DSUNPOS_ORIG -DMOONPOS_ORIG \
+         -DTRACE=2 \
+         -DNFREQ=5 -DNEXOBS=3 \
+         -DENAGLO -DENAQZS -DENACMP -DENAGAL -DENAIRN \
+         -DSVR_REUSEADDR
+LDFLAGS = -Wl,--gc-sections,--strip-all -flto
+LIBS = -lm -lpthread
+
+# Alternative `-mcpu=native` sur la machine de build CM5
+# Mais préférable d'expliciter pour reproductibilité CI
+```
+
+**Notes** :
+- `-mcpu=cortex-a76` active automatiquement les bonnes options NEON / FP16 / LSE atomics
+- `-flto` (Link-Time Optimization) gain ~3-5 % sur AArch64 GCC ≥ 11
+- `-march=armv8.2-a+crypto+fp16` : `crypto` peu utile à RTKLIB mais cohérent ; `fp16` peut aider sur certaines opérations matricielles si compilateur l'utilise
+- **Ne pas activer** `-mcpu=cortex-a72` (CM4/Pi 4) — vous perdez ~5 % perf sur CM5
+- Cross-compile possible depuis x86_64 avec `aarch64-linux-gnu-gcc`
+
+#### Profilage natif sur CM5
+
+```bash
+# perf disponible sur Raspberry Pi OS (apt install linux-perf)
+sudo perf record -F 200 -g -e cycles:u ./rtkrcv -s cfg
+sudo perf report --stdio | head -50
+
+# Sysfs CPU info
+cat /proc/cpuinfo  # vérifier "cpu implementer" + "cpu part" = 0xd0b (Cortex-A76)
+
+# Surveillance température (CM5 throttle à 80°C)
+vcgencmd measure_temp
+vcgencmd get_throttled  # 0x0 = pas de throttle
+```
+
+⚠️ **Throttling thermique CM5** : sans dissipateur actif, le CM5 throttle aggressivement sous charge soutenue. Pour un `rtkrcv` 24/7, **prévoir un dissipateur + ventilo**, sinon les gains de §10.5 sont annulés par la baisse de fréquence dynamique.
+
+#### Threading rtkrcv sur 4 cœurs CM5
+
+Le CM5 a 4 cœurs A76. `rtkrcv` est mono-thread principal + threads stream. Pour exploiter :
+- Pin du thread principal sur cœur dédié (`taskset -c 2 ./rtkrcv ...`)
+- Cœur 0 réservé à l'OS / IRQ
+- Cœurs 1-3 pour rtkrcv + workers
+- Avec patch `matmul` SIMD/OpenMP (sprint 3) : `OMP_NUM_THREADS=3` exploite réellement les 3 cœurs disponibles
+
+#### RAM CM5 : moins critique que sur cible embarquée
+
+Variantes CM5 à 4 / 8 / 16 GB → la RAM n'est plus un facteur limitant. Les sections §10.4 sur RAM perdent en priorité **sauf** si :
+- Vous avez d'autres process critiques (NTRIP cast, MQTT publisher, watchdog, logger…) qui se partagent la RAM
+- Vous lancez plusieurs `rtkrcv` en parallèle sur le même CM5 (multi-récepteur)
+
+#### Spécifique kernel / Pi OS
+
+- **Raspberry Pi OS Bookworm 64-bit** ou Ubuntu 24.04 ARM64 — cohérent avec ARMv8.2-A
+- `_POSIX_C_SOURCE=200112L` (commit `a2cc5a9`) compatible — pas de souci POSIX
+- Lib `librt` désormais conditionnée Linux uniquement (`eafc728`) — OK
+- I/O : `mmap` plus rapide que `read` pour les gros `.tag` — non utilisé par RTKLIB par défaut, opportunité d'optim
+
+### 10.7 Roadmap optimisation
 
 **Sprint 1 (en cours)** — voir §7 :
 - ✅ Cherry-picks fixes critiques (déjà incluent `fbb9ea2`, `d96a5c7`, `f91603c` côté perf)
