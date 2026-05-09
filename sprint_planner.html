@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Sprint Planner — RTKLIB 6c53 → HEAD</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    margin: 0;
+    background: #0f1419;
+    color: #e6e6e6;
+    min-height: 100vh;
+  }
+  header {
+    background: #161b22;
+    padding: 16px 24px;
+    border-bottom: 1px solid #30363d;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  header h1 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+  }
+  header .subtitle {
+    font-size: 12px;
+    color: #8b949e;
+    margin-top: 2px;
+  }
+  .actions {
+    display: flex;
+    gap: 8px;
+  }
+  button {
+    background: #238636;
+    color: white;
+    border: none;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: background 0.15s;
+  }
+  button:hover { background: #2ea043; }
+  button.secondary { background: #30363d; }
+  button.secondary:hover { background: #444c56; }
+  button.danger { background: #b62324; }
+  button.danger:hover { background: #da3633; }
+
+  .board {
+    display: flex;
+    gap: 12px;
+    padding: 16px;
+    overflow-x: auto;
+    min-height: calc(100vh - 70px);
+  }
+  .column {
+    flex: 0 0 320px;
+    background: #161b22;
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid #30363d;
+    max-height: calc(100vh - 100px);
+  }
+  .column h2 {
+    margin: 0 0 4px 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: #58a6ff;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .column .meta {
+    font-size: 11px;
+    color: #8b949e;
+    margin-bottom: 12px;
+  }
+  .column .cards {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 60px;
+    padding-right: 4px;
+  }
+  .column.drag-over .cards {
+    background: rgba(56, 139, 253, 0.08);
+    border-radius: 4px;
+  }
+
+  .card {
+    background: #21262d;
+    border: 1px solid #30363d;
+    border-radius: 6px;
+    padding: 10px;
+    margin-bottom: 8px;
+    cursor: grab;
+    font-size: 12.5px;
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .card:hover { border-color: #58a6ff; }
+  .card.dragging { opacity: 0.4; cursor: grabbing; }
+  .card .header-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .card .title {
+    font-weight: 600;
+    color: #e6e6e6;
+    flex: 1;
+    line-height: 1.3;
+  }
+  .severity {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .severity.critical { background: #f85149; }
+  .severity.high     { background: #ff8c00; }
+  .severity.medium   { background: #d29922; }
+  .severity.low      { background: #3fb950; }
+  .severity.info     { background: #58a6ff; }
+
+  .badges {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .badge {
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: #30363d;
+    color: #8b949e;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  .badge.type-cherry { background: #1f6feb; color: white; }
+  .badge.type-custom { background: #8957e5; color: white; }
+  .badge.type-flag   { background: #fb950d; color: white; }
+  .badge.type-config { background: #2ea043; color: white; }
+  .badge.type-eval   { background: #6e7681; color: white; }
+  .card .summary {
+    color: #c9d1d9;
+    line-height: 1.4;
+    font-size: 12px;
+  }
+  .card .meta-line {
+    margin-top: 6px;
+    font-size: 11px;
+    color: #8b949e;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  details {
+    margin-top: 6px;
+  }
+  details summary {
+    cursor: pointer;
+    font-size: 11px;
+    color: #58a6ff;
+    user-select: none;
+  }
+  details .expanded {
+    margin-top: 6px;
+    padding: 6px;
+    background: #161b22;
+    border-radius: 4px;
+    font-size: 11.5px;
+    color: #c9d1d9;
+    line-height: 1.4;
+  }
+  details code, .card code {
+    background: #0d1117;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 11px;
+  }
+
+  .legend {
+    display: flex;
+    gap: 12px;
+    padding: 8px 16px;
+    background: #161b22;
+    border-bottom: 1px solid #30363d;
+    font-size: 11px;
+    color: #8b949e;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #238636;
+    color: white;
+    padding: 12px 20px;
+    border-radius: 6px;
+    font-size: 13px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  .toast.show { opacity: 1; }
+
+  .modal {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal.show { display: flex; }
+  .modal-content {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    width: 80%;
+    max-width: 900px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .modal-header {
+    padding: 12px 16px;
+    border-bottom: 1px solid #30363d;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .modal-header h3 { margin: 0; font-size: 15px; }
+  .modal-body {
+    padding: 16px;
+    overflow: auto;
+    flex: 1;
+  }
+  .modal textarea {
+    width: 100%;
+    min-height: 400px;
+    background: #0d1117;
+    color: #e6e6e6;
+    border: 1px solid #30363d;
+    border-radius: 4px;
+    padding: 10px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.4;
+    resize: vertical;
+  }
+  .modal-footer {
+    padding: 12px 16px;
+    border-top: 1px solid #30363d;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>📋 Sprint Planner — RTKLIB 6c53 → HEAD</h1>
+    <div class="subtitle">Glissez-déposez les findings pour organiser les sprints • Cliquez "Copier MD" pour exporter le plan</div>
+  </div>
+  <div class="actions">
+    <button id="copyMd">📋 Copier MD</button>
+    <button id="viewMd" class="secondary">👁 Aperçu MD</button>
+    <button id="exportJson" class="secondary">💾 Export JSON</button>
+    <button id="importJson" class="secondary">📂 Import JSON</button>
+    <button id="reset" class="danger">🔄 Reset</button>
+  </div>
+</header>
+
+<div class="legend">
+  <div class="legend-item"><span class="severity critical"></span>Critique</div>
+  <div class="legend-item"><span class="severity high"></span>Haute</div>
+  <div class="legend-item"><span class="severity medium"></span>Moyenne</div>
+  <div class="legend-item"><span class="severity low"></span>Basse</div>
+  <div class="legend-item"><span class="severity info"></span>Info</div>
+  <div class="legend-item">|</div>
+  <div class="legend-item"><span class="badge type-cherry">cherry-pick</span></div>
+  <div class="legend-item"><span class="badge type-custom">patch maison</span></div>
+  <div class="legend-item"><span class="badge type-flag">flag compil</span></div>
+  <div class="legend-item"><span class="badge type-config">config runtime</span></div>
+  <div class="legend-item"><span class="badge type-eval">eval/audit</span></div>
+</div>
+
+<div class="board" id="board"></div>
+
+<div class="toast" id="toast">Copié dans le presse-papier !</div>
+
+<div class="modal" id="mdModal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Aperçu Markdown</h3>
+      <button class="secondary" onclick="document.getElementById('mdModal').classList.remove('show')">✕</button>
+    </div>
+    <div class="modal-body">
+      <textarea id="mdTextarea" readonly></textarea>
+    </div>
+    <div class="modal-footer">
+      <button id="copyFromModal">📋 Copier</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="importFile" style="display:none" accept=".json">
+
+<script>
+// ================= DATA =================
+
+const SPRINTS = [
+  { id: 'backlog',   title: 'Backlog',     subtitle: 'Findings non triés' },
+  { id: 'sprint1',   title: 'Sprint 1',    subtitle: '2 sem — fixes critiques + patches isolés' },
+  { id: 'sprint1_5', title: 'Sprint 1.5',  subtitle: '1-2 j — quick wins compile/runtime' },
+  { id: 'sprint2',   title: 'Sprint 2',    subtitle: '3-4 sem — features + NFREQ cleanup + PPP-AR' },
+  { id: 'sprint3',   title: 'Sprint 3',    subtitle: '2-3 sem — refactor temps réel + concurrence' },
+  { id: 'rejete',    title: 'Rejeté',      subtitle: 'Hors périmètre / différé' },
+];
+
+const FINDINGS = [
+  // ===== Sprint 1 — fixes critiques =====
+  { id: 'p01', sprint: 'sprint1', sev: 'critical', type: 'cherry', title: 'Kalman m/s conversion', commits: ['1ff4727'], files: ['src/rtkpos.c'], loc: 3,
+    summary: 'Conversion m↔s manquante sur Kalman clock bias states.',
+    rationale: 'Corruption silencieuse de la solution si l\'init position ne converge pas.' },
+  { id: 'p02', sprint: 'sprint1', sev: 'critical', type: 'cherry', title: 'varerr() PPP iono-free non-L1/L2', commits: ['b99d11b'], files: ['src/ppp.c'], loc: 10,
+    summary: 'Bug varerr() pour iono-free sur systèmes hors L1/L2.',
+    rationale: 'Sans ça, variance fausse pour Galileo E1/E5 → divergence en multi-constell.' },
+  { id: 'p03', sprint: 'sprint1', sev: 'critical', type: 'cherry', title: 'OOB ppp.c (M. Valgur)', commits: ['1a66490'], files: ['src/ppp.c'], loc: 5,
+    summary: 'Out-of-bounds dans ppp.c (PR mergée upstream).',
+    rationale: 'Bug mémoire détecté par contrib externe, fix accepté en upstream.' },
+  { id: 'p04', sprint: 'sprint1', sev: 'high', type: 'cherry', title: 'GLO dual-freq iono', commits: ['efe4e67'], files: ['src/rtkpos.c'], loc: 5,
+    summary: 'Correction iono GLONASS dual-fréquence.',
+    rationale: 'Erreur d\'unité dans le calcul iono GLONASS.' },
+  { id: 'p05', sprint: 'sprint1', sev: 'high', type: 'cherry', title: 'AR retries GLO_AR', commits: ['b49ce01'], files: ['src/rtkpos.c'], loc: 10,
+    summary: 'AR cassée si GLO=off + GLO_AR=fix-and-hold.',
+    rationale: 'Configuration GLO_AR ignorée silencieusement (RTK only — PPP-AR vide).' },
+  { id: 'p06', sprint: 'sprint1', sev: 'high', type: 'cherry', title: 'RINEX timestamp roundoff', commits: ['5cfa31b'], files: ['src/rinex.c'], loc: 3,
+    summary: 'Roundoff timestamps RINEX (entrées 60s parasites avec -TADJ).',
+    rationale: 'Évite des duplications d\'époques en sortie RINEX.' },
+  { id: 'p07', sprint: 'sprint1', sev: 'high', type: 'cherry', title: 'Instantaneous AR lock count', commits: ['f1a7d2f'], files: ['src/rtkpos.c'], loc: 5,
+    summary: 'AR instantanée — reset excessif lock count (RTK).',
+    rationale: 'Optimisation conservative de la logique de reset.' },
+  { id: 'p08', sprint: 'sprint1', sev: 'high', type: 'cherry', title: 'Resync RTCM3 après msg invalide', commits: ['269c2d5'], files: ['src/rtcm3.c'], loc: 15,
+    summary: 'Reprend après le préambule valide suivant si RTCM3 invalide.',
+    rationale: 'Évite la perte de messages SSR/RTCM en temps réel.' },
+  { id: 'p09', sprint: 'sprint1', sev: 'high', type: 'cherry', title: '-sys CLI bug rnx2rtkp', commits: ['6bb4ab2'], files: ['app/consapp/rnx2rtkp/rnx2rtkp.c'], loc: 10,
+    summary: 'Bug option -sys CLI rnx2rtkp + manuel.',
+    rationale: 'Combinaison de constellations CLI mal interprétée — bug visible en post-process.' },
+  { id: 'p10', sprint: 'sprint1', sev: 'high', type: 'custom', title: 'rtkrcv cmd_restart reproductibilité', commits: ['(maison)'], files: ['app/consapp/rtkrcv/rtkrcv.c:1078-1085'], loc: 3,
+    summary: 'Ajouter rtksvrinit(&svr) entre stopsvr et startsvr.',
+    rationale: 'Garantit qu\'un rejeu via restart produit le même résultat — critique pour validation .tag replay.' },
+  { id: 'p11', sprint: 'sprint1', sev: 'high', type: 'cherry', title: 'rtkrcv prstatus 5-7 freqs', commits: ['569197d'], files: ['app/consapp/rtkrcv/rtkrcv.c'], loc: 10,
+    summary: 'prstatus rempli pour 5 à 7 fréquences.',
+    rationale: 'Nécessaire avec NFREQ=5+ : sans ça notre .stat parser voit des champs vides.' },
+  { id: 'p12', sprint: 'sprint1', sev: 'medium', type: 'cherry', title: 'Position options rework', commits: ['9c9ec53'], files: ['src/options.c'], loc: 50,
+    summary: 'Rework des position options.',
+    rationale: 'Cohérence config rcv. Vérifier que nos .conf chargent toujours sans warning.' },
+  { id: 'p13', sprint: 'sprint1', sev: 'low', type: 'flag', title: 'Compile flags CM5 + NFREQ=5', commits: ['Makefile'], files: ['Makefile'], loc: 0,
+    summary: '-DNFREQ=5 -mcpu=cortex-a76 -O3 -flto -ffast-math -DSUNPOS_ORIG -DMOONPOS_ORIG -DTRACE=2',
+    rationale: 'NFREQ=5 capture B1C BDS-3 + E6 Galileo. Flags Cortex-A76 ciblent CM5 production.' },
+
+  // Sprint 1 — Cluster Septentrio
+  { id: 'p14a', sprint: 'sprint1', sev: 'critical', type: 'cherry', title: 'Septentrio refonte parser', commits: ['670690a','784056a'], files: ['src/rcv/septentrio.c'], loc: 200,
+    summary: 'Observations bufferisées par époque + commit fin d\'époque + fallback si EOEB manquant.',
+    rationale: 'Mosaic X5 = notre récepteur. Sans ça on perd des observations en streaming.' },
+  { id: 'p14b', sprint: 'sprint1', sev: 'critical', type: 'cherry', title: 'Septentrio flush début routine', commits: ['253bfb3'], files: ['src/rcv/septentrio.c'], loc: 30,
+    summary: 'Flush au début des routines de lecture → évite datasets incohérents.',
+    rationale: 'Avec 670690a/784056a, ce flush évite les états corrompus inter-époques.' },
+  { id: 'p14c', sprint: 'sprint1', sev: 'critical', type: 'cherry', title: 'Septentrio multi-stream thread-safe', commits: ['26ed828'], files: ['src/rcv/septentrio.c','src/rcvraw.c'], loc: 200,
+    summary: 'Static data déplacé dans struct raw → multi-stream simultané thread-safe.',
+    rationale: 'Important si rtkrcv décode plusieurs streams (rover + base).' },
+  { id: 'p14d', sprint: 'sprint1', sev: 'critical', type: 'cherry', title: 'Septentrio fix rejeu .tag', commits: ['79991f2'], files: ['src/rcv/septentrio.c'], loc: 2,
+    summary: 'Sur 2ᵉ passe, observations rejetées car non newer than buffer.',
+    rationale: 'Pertinent pour notre workflow rejeu .tag.' },
+  { id: 'p15a', sprint: 'sprint1', sev: 'high', type: 'cherry', title: 'Septentrio RCVSTDS + SNR/Doppler', commits: ['d2c94b3'], files: ['src/rcv/septentrio.c'], loc: 30,
+    summary: 'SNR, doppler, GLO FCN + option RCVSTDS (stddev observations).',
+    rationale: 'Meilleure pondération filtre via stddev récepteur.' },
+  { id: 'p15b', sprint: 'sprint1', sev: 'high', type: 'cherry', title: 'Septentrio GLO unaligned access', commits: ['431ec5a'], files: ['src/rcv/septentrio.c'], loc: 15,
+    summary: 'GLO raw cnav : évite accès subframe non aligné.',
+    rationale: 'Critique sur ARM strict alignment (CM5 : permissif mais à prendre par sécurité).' },
+  { id: 'p15c', sprint: 'sprint1', sev: 'medium', type: 'cherry', title: 'Septentrio sbslongcorrh / UTC BDS / GPS cnav', commits: ['682d64b','8080af0','62d2b69'], files: ['src/rcv/septentrio.c'], loc: 35,
+    summary: 'sbslongcorrh time + UTC BDS CNAV + decode_gpsrawcnav fixes.',
+    rationale: 'Fixes décodage spécifiques signaux modernes.' },
+
+  // ===== Sprint 1.5 — quick wins =====
+  { id: 'q01', sprint: 'sprint1_5', sev: 'high', type: 'config', title: 'svr->cycle 100→20-50 ms', files: ['rtkrcv.conf'],
+    summary: 'Réduit le polling passif rtksvr → -10 à -50 ms latence par cycle.',
+    rationale: 'Impact direct le plus rentable sur la latence end-to-end. Coût : +20-40% CPU.' },
+  { id: 'q02', sprint: 'sprint1_5', sev: 'medium', type: 'config', title: 'NTRIP timeout 30→5-10 s', files: ['rtkrcv.conf'],
+    summary: 'Réduit downtime SSR en cas de blocage NTRIP.',
+    rationale: 'Pas de watchdog par défaut dans stream.c — timeout court compense.' },
+  { id: 'q03', sprint: 'sprint1_5', sev: 'medium', type: 'config', title: 'Trace level 2→1 production', files: ['rtkrcv.conf'],
+    summary: 'Réduit overhead trace runtime.',
+    rationale: '-5 à -10% CPU. Réactiver à 2 pour debug.' },
+  { id: 'q04', sprint: 'sprint1_5', sev: 'medium', type: 'config', title: 'buffsize 32K→8K NTRIP', files: ['rtksvrstart args'],
+    summary: 'Réduit buffers stream ring.',
+    rationale: '-144 KB RAM en config NTRIP basse bande passante.' },
+  { id: 'q05', sprint: 'sprint1_5', sev: 'low', type: 'eval', title: 'Bench A/B compile flags', files: [],
+    summary: 'Mesurer gain réel des flags optimaux sur dataset témoin CM5.',
+    rationale: 'Validation expérimentale avant déploiement — règle Δscore.' },
+
+  // ===== Sprint 2 — features + NFREQ cleanup =====
+  { id: 's2a', sprint: 'sprint2', sev: 'high', type: 'cherry', title: 'Support .BIA / .BSX', commits: ['c0138bf','5b59da3','9ada3b7'], files: ['src/preceph.c'], loc: 200,
+    summary: 'Support biais satellite .BIA/.BSX pour PPP.',
+    rationale: 'Prérequis pour PPP-AR + exploitation produits IGS modernes.' },
+  { id: 's2b', sprint: 'sprint2', sev: 'high', type: 'cherry', title: 'Refonte DCB/OSB code biases', commits: ['d574080'], files: ['src/preceph.c','src/ppp.c'], loc: 150,
+    summary: 'Stockage OSB direct, étendu à toutes fréquences.',
+    rationale: 'Cohérence avec .BIA. Fix bug corruption nav data sans broadcast.' },
+  { id: 's2c', sprint: 'sprint2', sev: 'high', type: 'custom', title: 'Patch seliflc() pour nf≥4', files: ['src/rtkcmn.c:3744'], loc: 20,
+    summary: 'Choix dynamique freq2 selon système et NFREQ.',
+    rationale: 'Permet iono-free sur freq 3+ — débloque NFREQ=5/6 propre.' },
+  { id: 's2d', sprint: 'sprint2', sev: 'high', type: 'custom', title: 'Patch gfmeas/mwmeas paramétrés', files: ['src/ppp.c:385-406'], loc: 60,
+    summary: 'Boucle sur paires (0, f2) avec f2 ∈ {1, 2, …, nf-1}.',
+    rationale: 'Détection cycle-slip GF/MW sur freq 2-5.' },
+  { id: 's2e', sprint: 'sprint2', sev: 'medium', type: 'custom', title: 'EFACT_*_L5 par constellation', files: ['src/ppp.c:355-357','src/rtklib.h'], loc: 30,
+    summary: 'Ajouter EFACT_GAL_L5, EFACT_CMP_L5, EFACT_IRN_L5.',
+    rationale: 'Variance correcte pour L5/E5a/B2a non-GPS.' },
+  { id: 's2f', sprint: 'sprint2', sev: 'medium', type: 'custom', title: 'Facteur iono-free dynamique', files: ['src/ppp.c:372'], loc: 5,
+    summary: 'Calculer SQR(f1/(f1-f2)) selon paire réelle.',
+    rationale: 'Variance iono-free correcte pour combinaisons E1/E5x.' },
+  { id: 's2g', sprint: 'sprint2', sev: 'medium', type: 'custom', title: 'Slip iono-free f2 dynamique', files: ['src/ppp.c:754'], loc: 5,
+    summary: 'slip[seliflc(nf,sys)] au lieu de slip[1].',
+    rationale: 'Réinit biais iono-free correcte sur slips freq 2-5.' },
+  { id: 's2h', sprint: 'sprint2', sev: 'low', type: 'custom', title: 'test_hold_amb boucle toutes freqs', files: ['src/ppp.c:1162'], loc: 5,
+    summary: 'Boucle for (f=0; f<opt->nf; f++).',
+    rationale: 'Fix-and-hold sur freq 2-5 (impact futur PPP-AR).' },
+  { id: 's2i', sprint: 'sprint2', sev: 'low', type: 'custom', title: 'Guards Pstd[frq]/Lstd[frq]', files: ['src/ppp.c:368-369'], loc: 4,
+    summary: 'if (frq < NFREQ) avant accès.',
+    rationale: 'Anti-OOB si récepteur fournit > NFREQ stdevs.' },
+  { id: 's2j', sprint: 'sprint2', sev: 'medium', type: 'custom', title: 'DCB récepteur étendu (E5b, E6, B1C, B3)', files: ['src/ppp.c:819-821','src/rtklib.h'], loc: 80,
+    summary: 'Estimer 1 DCB par freq>2.',
+    rationale: 'Sans cela les biais récepteur multi-fréq sont absorbés par les ambiguïtés → conv lente.' },
+  { id: 's2k', sprint: 'sprint2', sev: 'high', type: 'custom', title: 'Factoriser satazel (1× au lieu de 2×)', files: ['src/ppp.c:222-316'], loc: 30,
+    summary: 'satazel calculé 1× dans setup, passé à ppp_res.',
+    rationale: '-10 à -12% CPU sur ppp_res, -0.5 ms/époque (30 sat).' },
+  { id: 's2l', sprint: 'sprint2', sev: 'medium', type: 'custom', title: 'Cache searchpcv antenna+time', files: ['src/preceph.c'], loc: 50,
+    summary: 'THREADLOCAL pcv cache, reset au-delà de 60s.',
+    rationale: '-2 à -5% CPU sur peph2pos avec satantoff.' },
+  { id: 's2m', sprint: 'sprint2', sev: 'low', type: 'custom', title: 'Borner peph[] anti-fuite long-run', files: ['src/preceph.c'], loc: 20,
+    summary: 'Plafonner à 24h/interval ≈ 2880 entries.',
+    rationale: 'Anti-fuite mémoire en post-process long.' },
+  { id: 's2n', sprint: 'sprint2', sev: 'critical', type: 'eval', title: 'PPP-AR import (rtklib-py / PPP-Wizard)', files: ['src/ppp_ar.c'],
+    summary: 'ppp_ar.c est un stub vide depuis 2016 — réimplémentation tierce.',
+    rationale: 'Mode ppp-fixed est actuellement un no-op. Prérequis : .BIA support (s2a).' },
+  { id: 's2o', sprint: 'sprint2', sev: 'low', type: 'flag', title: 'Bascule NFREQ=5→6 (après s2c-s2j)', files: ['Makefile'],
+    summary: 'Active la 6ᵉ freq (E5-AltBOC GAL, B2ab BDS, G2a GLO).',
+    rationale: 'Maximum théorique Mosaic X5. Conditionnel à patches s2c-s2j.' },
+
+  // ===== Sprint 3 — refactor temps réel =====
+  { id: 's3a', sprint: 'sprint3', sev: 'high', type: 'custom', title: 'Event-driven server loop', files: ['src/rtksvr.c'], loc: 100,
+    summary: 'sleepms() → select() timeout 50 ms.',
+    rationale: '-2 à -5 ms latence. Risque moyen.' },
+  { id: 's3b', sprint: 'sprint3', sev: 'medium', type: 'custom', title: 'SSR timestamp buffer', files: ['src/rtksvr.c','src/rtcm3.c'], loc: 200,
+    summary: 'Queue avec timestamps + apply-on-rtkpos.',
+    rationale: '-0.5 ms variance. Risque faible.' },
+  { id: 's3c', sprint: 'sprint3', sev: 'medium', type: 'custom', title: 'matmul SIMD/OpenMP', files: ['src/rtkcmn.c:1100-1250'], loc: 50,
+    summary: 'Parallel matmul (OpenMP/AVX/NEON).',
+    rationale: '-3 à -5 ms sur grand nx. Risque moyen.' },
+  { id: 's3d', sprint: 'sprint3', sev: 'critical', type: 'custom', title: 'Refactor dépendance GPS udclk_ppp', files: ['src/ppp.c:606-624','src/pntpos.c'], loc: 200,
+    summary: 'Élection dynamique système de référence horloge.',
+    rationale: 'Stabilité PPP sans GPS (urban canyon, scénarios futurs).' },
+  { id: 's3e', sprint: 'sprint3', sev: 'medium', type: 'custom', title: 'Support SSR-IM201 (IGS standard)', files: ['src/rtcm3.c'], loc: 150,
+    summary: 'Décodeur 4076 subtype ≥ 200 ou IM201.',
+    rationale: 'Compat futur NTRIP cast IM201.' },
+  { id: 's3f', sprint: 'sprint3', sev: 'medium', type: 'custom', title: 'IRNSS subtypes 4076 (141-147)', files: ['src/rtcm3.c:2604-2618'], loc: 30,
+    summary: 'Étendre switch IGS-SSR aux subtypes IRNSS.',
+    rationale: 'Couverture IRNSS si flux SSR le contient.' },
+  { id: 's3g', sprint: 'sprint3', sev: 'medium', type: 'custom', title: 'Élim. copies obs brutes', files: ['src/rtksvr.c'], loc: 300,
+    summary: 'Ring buffer direct réseau→rtkpos.',
+    rationale: '-0.2 ms. Risque élevé (refactor majeur).' },
+
+  // ===== Backlog — audits non priorisés =====
+  { id: 'b01', sprint: 'backlog', sev: 'critical', type: 'custom', title: 'Guards sat>0 dans preceph.c', files: ['src/preceph.c:486,494,502,504,221,240,244,249,252'], loc: 30,
+    summary: '~10 occurrences accès [sat-1] sans guard sat>0.',
+    rationale: 'OOB silencieux si satid2no retourne 0 sur PRN invalide.' },
+  { id: 'b02', sprint: 'backlog', sev: 'high', type: 'custom', title: 'Guard code<MAXCODE dans code2bias', files: ['src/preceph.c:454'], loc: 5,
+    summary: 'code_bias_ix[sys_ix][code] indexé sans check code<MAXCODE.',
+    rationale: 'OOB potentiel sur nouveau code RTCM v3.3+.' },
+  { id: 'b03', sprint: 'backlog', sev: 'medium', type: 'custom', title: 'Réinit ionex header inter-fichiers', files: ['src/ionex.c:126-171'], loc: 20,
+    summary: 'lats/lons/hgts/nexp/rb persistent entre fichiers.',
+    rationale: 'Interpolation TEC sur mauvaise grille en multi-fichiers.' },
+  { id: 'b04', sprint: 'backlog', sev: 'high', type: 'custom', title: 'SSR future-timestamp guard', files: ['src/rtksvr.c:318-324'], loc: 10,
+    summary: 'Aucun test ssr_time ≤ current_time.',
+    rationale: 'Corrections SSR avec timestamp futur appliquées telles quelles → divergence.' },
+  { id: 'b05', sprint: 'backlog', sev: 'medium', type: 'custom', title: 'IODE matching BDS/SBAS/IRNSS', files: ['src/rtksvr.c:330-340'], loc: 30,
+    summary: 'Matching SSR↔broadcast seulement GPS/GAL/QZS/GLO.',
+    rationale: 'BDS/SBAS/IRNSS appliquent corrections sans vérif IODE.' },
+  { id: 'b06', sprint: 'backlog', sev: 'medium', type: 'custom', title: 'Flag pbias_valid SSR7', files: ['src/rtcm3.c:2015-2019','src/rtklib.h'], loc: 10,
+    summary: 'Pas de flag indiquant si pbias[] a été défini.',
+    rationale: 'Biais nuls appliqués comme si intentionnels.' },
+  { id: 'b07', sprint: 'backlog', sev: 'low', type: 'custom', title: 'NTRIP watchdog par message', files: ['src/stream.c'], loc: 50,
+    summary: 'Pas de timeout par message en cours.',
+    rationale: 'SSR fragmenté/bloqué donne corrections stales >10s.' },
+  { id: 'b08', sprint: 'backlog', sev: 'low', type: 'custom', title: 'BeiDou code_bias_ix codes modernes', files: ['src/preceph.c:99-100'], loc: 10,
+    summary: 'Manque L8T, L6D, L5D modernes.',
+    rationale: 'Biais code BeiDou modernes ignorés silencieusement.' },
+  { id: 'b09', sprint: 'backlog', sev: 'low', type: 'eval', title: 'Adoption CMake + tests unitaires', files: ['CMakeLists.txt','tests/'],
+    summary: 'CMake re-add (bb563a0) + tests intégrés (ffe4d49,14dd080).',
+    rationale: 'Levier doc-as-code + Δscore non-régression.' },
+  { id: 'b10', sprint: 'backlog', sev: 'low', type: 'cherry', title: 'Tides solid Earth refonte (IERS, hardisp/dehanttideinel C)', commits: ['e00b170','8c9d5dc','a425d7e','92f8a6d','9a2f2ec','be9a673'], files: ['src/rtkcmn.c'], loc: 500,
+    summary: 'hardisp et dehanttideinel traduits Fortran→C inline + IERS mean pole MAJ + VMF1_HT fix.',
+    rationale: 'Impact PPP statique long-run. À évaluer si scénario projet.' },
+  { id: 'b11', sprint: 'backlog', sev: 'medium', type: 'cherry', title: 'NMEA GST + GGA refstationid', commits: ['7d7a3d7','4994033','f361dac'], files: ['src/solution.c'], loc: 30,
+    summary: 'Output NMEA GST sentence + refstationid GGA + GSA satellite count fix.',
+    rationale: 'Si vous sortez du NMEA pour aval, à intégrer.' },
+  { id: 'b12', sprint: 'backlog', sev: 'low', type: 'cherry', title: 'str2str log files + messages per stream', commits: ['4d1057d','1c178e7'], files: ['app/consapp/str2str/str2str.c'], loc: 100,
+    summary: 'str2str support fichiers de log + messages par stream output.',
+    rationale: 'Utile si str2str dans la chaîne temps réel.' },
+  { id: 'b13', sprint: 'backlog', sev: 'low', type: 'cherry', title: '--version / --detach console apps', commits: ['02ec964','493d80e'], files: ['app/consapp/'], loc: 50,
+    summary: 'Flags --version et --detach normalisés.',
+    rationale: 'Utile pour traçabilité release / daemon mode.' },
+  { id: 'b14', sprint: 'backlog', sev: 'low', type: 'cherry', title: 'postpos multi-file robustness', commits: ['5964d8a','1a47317','b88dfee','a1c9242','e995e50'], files: ['src/postpos.c'], loc: 80,
+    summary: 'Anti-crash malloc, header ref pos, ifile allocation.',
+    rationale: 'Robustesse rnx2rtkp multi-file post-process.' },
+  { id: 'b15', sprint: 'backlog', sev: 'low', type: 'cherry', title: 'Threading safety: strtok_r / gmtime_r / sbstropcorr cache', commits: ['81c7df0','1aa29c9','558048a'], files: ['src/'], loc: 60,
+    summary: 'Remplace fonctions non-réentrantes.',
+    rationale: 'Si rtkrcv multi-thread ou multi-process partage code.' },
+
+  // ===== Rejeté / hors périmètre =====
+  { id: 'r01', sprint: 'rejete', sev: 'info', type: 'eval', title: 'Patches GUI (RTKPOST/RTKNAVI/Qt)', files: [],
+    summary: 'Tous patches UI Embarcadero/Qt.',
+    rationale: 'Hors périmètre projet (CLI uniquement).' },
+  { id: 'r02', sprint: 'rejete', sev: 'info', type: 'eval', title: 'Migration version (b34l, EX 2.5.0, HEAD)', files: [],
+    summary: 'Bascule complète vers tag stable.',
+    rationale: 'Politiquement difficile vu testing 6c53. Cherry-picks préférés.' },
+  { id: 'r03', sprint: 'rejete', sev: 'info', type: 'eval', title: 'NFREQ=3→4 patch upstream complet (199be2b)', files: [],
+    summary: 'Patch upstream complet propage defaults UI.',
+    rationale: 'On utilise -DNFREQ=5 directement (flag compil), pas le patch complet.' },
+];
+
+// ================= STATE =================
+
+const STORAGE_KEY = 'rtklib_sprint_planner_v1';
+
+function loadState() {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch (e) {}
+  // default state = positions encoded in FINDINGS
+  return {};
+}
+
+function saveState() {
+  const positions = {};
+  document.querySelectorAll('.card').forEach(card => {
+    const sprint = card.closest('.column').dataset.sprint;
+    positions[card.dataset.id] = sprint;
+  });
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(positions));
+}
+
+function applyState() {
+  const positions = loadState();
+  FINDINGS.forEach(f => {
+    if (positions[f.id]) f.sprint = positions[f.id];
+  });
+}
+
+// ================= RENDER =================
+
+function renderBoard() {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+
+  SPRINTS.forEach(s => {
+    const col = document.createElement('div');
+    col.className = 'column';
+    col.dataset.sprint = s.id;
+    col.innerHTML = `
+      <h2>
+        <span>${s.title}</span>
+        <span class="meta count" data-count></span>
+      </h2>
+      <div class="meta">${s.subtitle}</div>
+      <div class="cards"></div>
+    `;
+    board.appendChild(col);
+
+    col.addEventListener('dragover', e => {
+      e.preventDefault();
+      col.classList.add('drag-over');
+    });
+    col.addEventListener('dragleave', e => {
+      col.classList.remove('drag-over');
+    });
+    col.addEventListener('drop', e => {
+      e.preventDefault();
+      col.classList.remove('drag-over');
+      const id = e.dataTransfer.getData('text/plain');
+      const card = document.querySelector(`[data-id="${id}"]`);
+      if (card) {
+        col.querySelector('.cards').appendChild(card);
+        const finding = FINDINGS.find(f => f.id === id);
+        if (finding) finding.sprint = col.dataset.sprint;
+        saveState();
+        updateCounts();
+      }
+    });
+  });
+
+  FINDINGS.forEach(f => renderCard(f));
+  updateCounts();
+}
+
+function renderCard(f) {
+  const col = document.querySelector(`[data-sprint="${f.sprint}"] .cards`);
+  if (!col) return;
+
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.draggable = true;
+  card.dataset.id = f.id;
+
+  const typeLabel = {
+    cherry: 'cherry-pick',
+    custom: 'patch maison',
+    flag:   'flag compil',
+    config: 'config runtime',
+    eval:   'eval/audit'
+  }[f.type] || f.type;
+
+  const commitsHtml = f.commits ? f.commits.map(c => `<span class="badge">${c}</span>`).join('') : '';
+  const filesHtml = f.files && f.files.length ? `<div class="meta-line">📁 ${f.files.join(', ')}</div>` : '';
+  const locHtml = f.loc ? ` • ${f.loc} LOC` : '';
+
+  card.innerHTML = `
+    <div class="header-row">
+      <span class="severity ${f.sev}"></span>
+      <div class="title">${f.title}</div>
+    </div>
+    <div class="badges">
+      <span class="badge type-${f.type}">${typeLabel}</span>
+      ${commitsHtml}
+    </div>
+    <div class="summary">${f.summary}</div>
+    ${filesHtml}
+    <details>
+      <summary>Justification${locHtml}</summary>
+      <div class="expanded">${f.rationale || ''}</div>
+    </details>
+  `;
+
+  card.addEventListener('dragstart', e => {
+    card.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', f.id);
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  card.addEventListener('dragend', e => {
+    card.classList.remove('dragging');
+  });
+
+  col.appendChild(card);
+}
+
+function updateCounts() {
+  document.querySelectorAll('.column').forEach(col => {
+    const n = col.querySelectorAll('.card').length;
+    const counter = col.querySelector('[data-count]');
+    if (counter) counter.textContent = `${n}`;
+  });
+}
+
+// ================= MARKDOWN EXPORT =================
+
+function generateMarkdown() {
+  const sevLabel = { critical: '🔴', high: '🟠', medium: '🟡', low: '🟢', info: 'ℹ️' };
+  const typeLabel = {
+    cherry: 'cherry-pick',
+    custom: 'patch maison',
+    flag:   'flag compil',
+    config: 'config runtime',
+    eval:   'eval/audit'
+  };
+
+  let md = `# Plan Sprint RTKLIB — 6c53 → HEAD\n\n`;
+  md += `> Plan généré depuis sprint_planner.html — ${new Date().toISOString().slice(0,10)}\n\n`;
+
+  SPRINTS.forEach(s => {
+    const items = [];
+    document.querySelectorAll(`[data-sprint="${s.id}"] .card`).forEach(card => {
+      const f = FINDINGS.find(x => x.id === card.dataset.id);
+      if (f) items.push(f);
+    });
+    if (items.length === 0 && s.id !== 'backlog') return;
+
+    md += `## ${s.title} — ${s.subtitle}\n\n`;
+    if (items.length === 0) { md += `_Aucun finding._\n\n`; return; }
+
+    md += `| # | Prio | Type | Titre | Commits | Fichier(s) | LOC | Justification |\n`;
+    md += `|---|---|---|---|---|---|---|---|\n`;
+    items.forEach((f, i) => {
+      const commits = f.commits ? f.commits.map(c => `\`${c}\``).join(', ') : '—';
+      const files = f.files && f.files.length ? f.files.map(x => `\`${x}\``).join(', ') : '—';
+      const loc = f.loc ? `~${f.loc}` : '—';
+      md += `| ${i+1} | ${sevLabel[f.sev]} | ${typeLabel[f.type]} | ${f.title} | ${commits} | ${files} | ${loc} | ${f.rationale || ''} |\n`;
+    });
+    md += `\n`;
+  });
+
+  // Stats
+  const counts = {};
+  SPRINTS.forEach(s => {
+    counts[s.id] = document.querySelectorAll(`[data-sprint="${s.id}"] .card`).length;
+  });
+  md += `## Statistiques\n\n`;
+  SPRINTS.forEach(s => {
+    md += `- **${s.title}** : ${counts[s.id]} item(s)\n`;
+  });
+  md += `\n_Total : ${FINDINGS.length} findings_\n`;
+
+  return md;
+}
+
+// ================= ACTIONS =================
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+document.getElementById('copyMd').addEventListener('click', async () => {
+  const md = generateMarkdown();
+  try {
+    await navigator.clipboard.writeText(md);
+    showToast('Markdown copié !');
+  } catch (e) {
+    document.getElementById('mdTextarea').value = md;
+    document.getElementById('mdModal').classList.add('show');
+    showToast('Sélectionnez et copiez manuellement');
+  }
+});
+
+document.getElementById('viewMd').addEventListener('click', () => {
+  document.getElementById('mdTextarea').value = generateMarkdown();
+  document.getElementById('mdModal').classList.add('show');
+});
+
+document.getElementById('copyFromModal').addEventListener('click', async () => {
+  const ta = document.getElementById('mdTextarea');
+  ta.select();
+  try {
+    await navigator.clipboard.writeText(ta.value);
+    showToast('Markdown copié !');
+  } catch (e) {
+    document.execCommand('copy');
+    showToast('Copié (fallback)');
+  }
+});
+
+document.getElementById('exportJson').addEventListener('click', () => {
+  const positions = {};
+  FINDINGS.forEach(f => positions[f.id] = f.sprint);
+  const blob = new Blob([JSON.stringify(positions, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `sprint_plan_${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  showToast('JSON exporté');
+});
+
+document.getElementById('importJson').addEventListener('click', () => {
+  document.getElementById('importFile').click();
+});
+
+document.getElementById('importFile').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const positions = JSON.parse(ev.target.result);
+      FINDINGS.forEach(f => {
+        if (positions[f.id]) f.sprint = positions[f.id];
+      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(positions));
+      renderBoard();
+      showToast('JSON importé');
+    } catch (err) {
+      showToast('Erreur import JSON');
+    }
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById('reset').addEventListener('click', () => {
+  if (!confirm('Réinitialiser l\'organisation par défaut ?')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  // Reset to default positions from FINDINGS source
+  location.reload();
+});
+
+// ================= INIT =================
+
+applyState();
+renderBoard();
+</script>
+</body>
+</html>
