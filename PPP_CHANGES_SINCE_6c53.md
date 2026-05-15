@@ -1,7 +1,7 @@
 # PPP — Bugs corrigés et améliorations depuis le commit `6c53aa2`
 
 > **Référence** : `6c53aa2` — *"Clean up b33→b34 merge for obs files with multiple codes for same freq."* (rtklibexplorer, 21 sept. 2021)
-> **Tête analysée** : `28ad77c` (rtklibexplorer/RTKLIB, 1ᵉʳ mai 2026)
+> **Tête analysée** : `28ad77c` (rtklibexplorer/RTKLIB, 1ᵉʳ mai 2026) — voir §12 pour les commits postérieurs (jusqu'à `e913138`, 14 mai 2026)
 > **Périmètre** : tout ce qui touche PPP (statique, kinematic, fixed, AR), ses entrées (SP3, CLK, ANTEX, .BIA/.BSX, DCB, IONEX, SBAS-tropo, SSR), et ses interfaces (RTKPOST, RTKNAVI, RTKNAVI-Qt, RNX2RTKP, RTKRCV).
 
 ---
@@ -1329,4 +1329,60 @@ Si vous voulez moderniser votre build :
 
 ---
 
-*Synthèse établie sur 1298 commits (805 hors merges) entre `6c53aa2` et `28ad77c`. Périmètre projet = CLI uniquement. Sections 1-6 = analyse et audits. Section 7 = sprint 1. Section 8 = NFREQ=4 plan. Section 9 = doc-as-code (Astro). Section 10 = optim latence/CPU/RAM. Section 11 = autres améliorations (parsers récepteurs, RTCM3 / RINEX 3.05, tides/IERS, NMEA, CMake, tests unitaires, robustesse threading).*
+## 12. Veille — commits récents post-analyse (1 mai → 14 mai 2026)
+
+> Refetch effectué le 14 mai 2026 : 9 commits supplémentaires entre notre HEAD `28ad77c` et le nouveau HEAD `e913138`. Plusieurs **changent significativement** notre plan.
+
+### 12.1 🔥 Patches qui rendent obsolètes des items de notre sprint 2
+
+| Commit | Date | Sujet | Impact sur notre plan |
+|---|---|---|---|
+| `192ea5b` | 2026-05-12 | **Cycle slip detection PPP étendue à toutes freqs** (`gfmeas`/`mwmeas` paramétrés avec `f2`, `detslp_gf` boucle sur toutes freqs) | **🔥 Rend obsolète notre patch maison §8.5 tâche 2** (et `s2d` du planner). Exactement ce qu'on prévoyait d'écrire — rtklibexplorer l'a fait |
+| `5c9cd9d` | 2026-05-07 | **`satposs` corrigé pour SP3-only clocks** (sans broadcast eph), `pephclk` cherche dans precise clocks ET precise eph, `pephpos` corrige variance horloge non scalée par CLIGHT | Critique pour PPP avec produits IGS sans broadcast — atténue partie des risques §5 (dépendance broadcast) |
+| `bfd6491` | 2026-05-08 | `readrnxclk` : interpolation des stddev (cas 30s biases / 5min stddev IGS) | Améliore qualité pondération filtre PPP |
+| `2c64270` | 2026-05-10 | `update_ssr` : retire check IODE redondant (déjà dans `seleph()`) | Accélère prise en compte SSR. Affecte notre finding §6.4 IODE matching |
+| `17efff8` | 2026-05-08 | RTCM3 SSR : MAJ types, codes, offset BDS, retire std-dev | Améliore couverture SSR moderne |
+| `0e9a16a` | 2026-05-08 | `$SAT` output `.stat` PPP déplacé `rtkpos.c` → `ppp.c` (corrige indices d'état) | ⚠️ **Impact format `.stat` PPP** — vérifier vos parsers avant intégration |
+
+### 12.2 🔥 Nouveau feature majeur — VTEC iono
+
+| Commit | Date | Sujet |
+|---|---|---|
+| `7d13645` | 2026-05-13 | **VTEC spherical harmonics ionospheric model** + support **RTCM3 SSR message 1264** (VTEC iono corrections) + init état iono via VTEC si dispo. Touche `src/ionex.c` (+85), `src/ppp.c` (+51), `src/rtcm3.c` (+66), `src/rtklib.h` (+20), `src/rtksvr.c` (+5) |
+
+→ **Nouveau scénario PPP** : exploitation des corrections iono VTEC SSR (msg 1264) au lieu de IONEX statique. Très utile pour PPP temps réel multi-constell. À évaluer pour sprint 2/3.
+
+### 12.3 Build / divers
+
+| Commit | Date | Sujet |
+|---|---|---|
+| `50f55bc` | 2026-05-12 | CMake : `GNUInstallDirs` |
+| `eac7c0c` | 2024-11-20 | rtkplot integer overflow (UI, hors périmètre) |
+| `e31a503` | 2026-05-09 | rtknavi mondlg width SSR biases (UI, hors périmètre) |
+
+### 12.4 Mise à jour des sprints
+
+**Sprint 1** : pas d'impact direct (les nouveaux commits sont pour sprint 2/3).
+
+**Sprint 2** :
+- ❌ Retirer `s2d` (patch maison `gfmeas`/`mwmeas` paramétrés) → remplacé par cherry-pick `192ea5b` (~95 lignes upstream, déjà testé)
+- ➕ Ajouter cherry-pick `5c9cd9d` (satposs SP3-only clocks) — utile si PPP sans broadcast
+- ➕ Ajouter cherry-pick `bfd6491` (readrnxclk stddev interpolation)
+- ➕ Évaluer cherry-pick `7d13645` VTEC : si vos sources SSR émettent msg 1264, gain significatif. Sinon report sprint 3
+- ➕ Ajouter cherry-pick `17efff8` + `2c64270` (SSR types modernes + IODE check redondant)
+- ⚠️ Ajouter cherry-pick `0e9a16a` (`$SAT` deplacement) avec **test parser `.stat`**
+
+**Sprint 3** :
+- ➕ Si VTEC pas pris en sprint 2, le mettre ici
+
+### 12.5 Recommandation
+
+**Ne pas démarrer le sprint 1 sans avoir validé `0e9a16a`** sur vos parsers `.stat` — c'est le seul changement de format dans cette série.
+
+Pour le sprint 2, **réordonner les patches NFREQ cleanup** : prendre `192ea5b` upstream comme base (au lieu d'écrire `s2d` from scratch), puis poursuivre avec les 7 autres patches §8.5 restants.
+
+→ Le `sprint_planner.html` a été mis à jour en conséquence (`s2d` retiré, 6 nouvelles cartes ajoutées).
+
+---
+
+*Synthèse établie sur 1307 commits entre `6c53aa2` et `e913138` (14 mai 2026). Périmètre projet = CLI uniquement. Sections 1-6 = analyse et audits. Section 7 = sprint 1. Section 8 = NFREQ plan. Section 9 = doc-as-code (Astro). Section 10 = optim latence/CPU/RAM. Section 11 = autres améliorations. Section 12 = veille post-analyse.*
