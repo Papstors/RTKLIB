@@ -21,6 +21,8 @@ Il y a donc deux promesses distinctes à tenir, et elles n'ont pas la même diff
 
 Le chemin ci-dessous suit cet ordre. Chaque étape soit rend une erreur visible dans `P`, soit l'enlève. Une étape n'est acquise que lorsque son critère de sortie est mesuré sur le banc de rejeu.
 
+**Où se jouent l'atmosphère et les corrections dans ce chemin.** L'atmosphère est traitée en deux endroits : la troposphère à l'étape 3 (c'est elle qui biaise la hauteur) et l'ionosphère à l'étape 4 (c'est elle qui fixe la vitesse de convergence du non-combiné). Les erreurs contenues dans les corrections SSR sont traitées à l'étape 2, à égalité avec les biais d'entrée du récepteur, parce qu'elles produisent le même symptôme : un satellite faux qui déplace la position dans sa direction. Le banc de l'étape 0 dira laquelle des deux familles domine vos sessions ; le plan ne préjuge pas.
+
 ## Étape 0 — Construire l'instrument de mesure
 
 **Pourquoi.** Aujourd'hui vous constatez les 20 cm après coup. Il faut pouvoir rejouer n'importe quelle session à l'identique, avec une référence, et sortir deux chiffres par session : l'erreur réelle par composante, et le ratio erreur/σ annoncé.
@@ -32,7 +34,25 @@ Le chemin ci-dessous suit cet ordre. Chaque étape soit rend une erreur visible 
 - Une antenne de coordonnées connues pour une campagne de 24 h, découpée en fenêtres de 1 h à froid, plus vos sessions réelles quand une référence existe.
 - Un script de scoring (sur le modèle de `util/ppc-dataset/score_ppc_sol.py`) qui produit par fenêtre : temps pour passer et rester sous 5 cm 3D, erreur finale E/N/U, et la série `erreur/σ` par composante.
 
-**Critère de sortie.** Vous savez dire, pour n'importe quelle session, combien vous étiez loin et de combien le PE se trompait sur lui-même. La première campagne montrera très probablement un ratio erreur/σ de 3 à 10 en fin de convergence et des plateaux : c'est le point de départ, pas un échec.
+**Rejeu fidèle.** Le rejeu par `rnx2rtkp` + `.rtcm3` est commode pour l'analyse en masse, mais il n'ingère pas les corrections comme `rtksvr` (pas de `update_ssr()`, pas d'appariement d'IODE au fil de l'eau, pas de latence). Pour reproduire exactement ce que le PE a fait, enregistrer les flux avec horodatage (`::T` sur les chemins de `logstr1` et `logstr3`, `stream.c` écrit un fichier `.tag`) et rejouer avec `rtkrcv` lui-même sur ces fichiers (`inpstr*-type=file`, même option `::T`). Les deux voies sont utiles : `rtkrcv` pour la fidélité, `rnx2rtkp` pour la variation de paramètres.
+
+**Repère et époque de la vérité.** Les corrections CNES placent la position en ITRF2020 à l'époque courante. Une référence en RGF93 / ETRF2000 en diffère de plusieurs décimètres à près d'un mètre en 2026 (mouvement de plaque). Avant toute métrique, fixer le repère et l'époque de la référence et appliquer la transformation ; sinon on chasse un biais qui n'est pas dans le PE.
+
+**Vérité au millimètre par simulation.** `util/simobs` génère des observations à partir d'orbites connues : en boucle fermée (observations simulées → PE → position connue), chaque modèle (marées, wind-up, PCO, tropo, iono) se vérifie au millimètre, indépendamment des données réelles. C'est le test unitaire des étapes 2 et 3.
+
+**Voir ce qui se passe dans le PE.** Le `.stat` actuel donne `$POS`, `$CLK`, `$TROP`, `$ION`, `$SAT` (résidus post-fit, lock, slip, rejets, état d'ambiguïté). Il manque ce qui permet de comprendre une convergence ratée, à ajouter dans `pppoutstat()` et `rtksvr.c` :
+- `$FLT` par époque : nombre d'observations, rejets pré-fit et post-fit, itérations, statistique d'innovation normalisée et facteur de variance, DOP, nombre d'états actifs, temps de calcul.
+- `$INNO` par observation : innovation **pré-fit** et innovation normalisée par `HPHᵀ+R`. Les résidus post-fit sont toujours petits quand le filtre a absorbé un biais ; seules les innovations pré-fit disent la vérité.
+- `$AMB` par satellite et fréquence : âge de l'ambiguïté, valeur, variance, écart à `L − P` lissé, date et cause de la dernière réinitialisation.
+- `$SSR` par satellite : âge des corrections orbite et horloge, IODE SSR et IODE éphéméride utilisés, URA, `deph`, `dclk`, biais de code appliqués par signal (valeur, ou « absent »), statut du biais de phase.
+- `$VTEC` : valeur, `qi`, âge du 1264, nombre de STEC contraints, résidu de la contrainte par satellite.
+- `$EVT` : événements horodatés avec cause : saut de cycle (LLI, GF, MW, avec la valeur), réinitialisation d'ambiguïté ou de STEC, changement d'IODE, correction rejetée (âge, IOD incohérent, hors bornes), satellite exclu (élévation, santé, URA, rejet répété), saut d'horloge récepteur.
+- États lents : DCB récepteur, ISB, gradients tropo, a priori ZHD utilisé.
+Sous forme de lignes CSV comme les enregistrements existants, à un niveau `out-outstat` supplémentaire, pour rester lisibles par les mêmes outils. Un script d'analyse standard (résidus et innovations par satellite, âges d'ambiguïtés, STEC contre VTEC, ZTD, NIS, erreur contre σ quand une référence existe) accompagne le scoring.
+
+**Non-régression.** Un jeu de sessions enregistrées avec vérité, rejoué à chaque modification du PE, avec des seuils sur les métriques : c'est ce qui empêche une étape de casser la précédente.
+
+**Critère de sortie.** Vous savez dire, pour n'importe quelle session, combien vous étiez loin et de combien le PE se trompait sur lui-même, et vous pouvez remonter à la cause satellite par satellite. La première campagne montrera très probablement un ratio erreur/σ de 3 à 10 en fin de convergence et des plateaux : c'est le point de départ, pas un échec.
 
 ## Étape 1 — Rendre l'erreur annoncée honnête
 
@@ -48,7 +68,8 @@ Le chemin ci-dessous suit cet ordre. Chaque étape soit rend une erreur visible 
 2. **Facteur de variance a posteriori.** Après chaque `filter()`, calculer la statistique d'innovation normalisée `vᵀ(HPHᵀ+R)⁻¹v/nv` (la matrice est déjà formée dans `filter_()`, `src/rtkcmn.c`, il suffit de l'exposer) et son moyennage exponentiel sur 5 minutes. Si elle reste au-dessus de 1, `R` et `Q` sous-estiment la réalité : publier `sol.qr × s²`, et écrire `s²` dans le `.stat`.
 3. **Dérive des corrections dans `Q`.** Monter `prnbias` (1e-4 → ≈ 1e-3 m/√s) pour que l'ambiguïté puisse suivre la dérive d'horloge SSR et que `P` la garde ; ou, plus propre, un état de Gauss-Markov par satellite (τ ≈ 15 min, σ² = URA). Le réglage se fait sur le banc : on cherche un ratio erreur/σ ≈ 1, pas un σ minimal.
 4. **Garde-fou empirique.** À partir de la campagne, ajuster une courbe `σ_emp(t, composante)` de l'erreur réelle en fonction du temps depuis le démarrage à froid, et publier `max(σ_formel × s, σ_emp(t))`. C'est la garantie de cohérence tant que le reste n'est pas déployé, et un plancher ensuite.
-5. **Ne pas dire « convergé » sur la seule diagonale de `P`.** Conditions cumulatives : σ formel × s sous seuil, statistique d'innovation ≈ 1 sur 5 minutes, au moins six satellites dont l'ambiguïté a plus de N minutes, position stable à 3 cm sur 60 s, aucune réinitialisation récente.
+5. **Hygiène numérique.** `filter_()` met à jour `P` en forme `(I−KH)P` ; sur des sessions longues avec `MAXSAT` états STEC, passer en forme de Joseph ou symétriser `P` après chaque mise à jour, sinon la covariance perd sa positivité et le σ publié n'a plus de sens.
+6. **Ne pas dire « convergé » sur la seule diagonale de `P`.** Conditions cumulatives : σ formel × s sous seuil, statistique d'innovation ≈ 1 sur 5 minutes, au moins six satellites dont l'ambiguïté a plus de N minutes, position stable à 3 cm sur 60 s, aucune réinitialisation récente.
 
 **Critère de sortie.** Sur la campagne, 95 % des erreurs sont sous 2σ annoncé, par composante, y compris pendant la convergence. Le σ sera plus grand qu'avant : c'est normal, il est vrai.
 
@@ -63,6 +84,18 @@ Le chemin ci-dessous suit cet ordre. Chaque étape soit rend une erreur visible 
 - *Transitions d'IODE.* `update_ssr()` (`src/rtksvr.c:314`) ne garde que deux éphémérides par satellite ; Galileo change d'IODnav toutes les 10 minutes. Garder au moins quatre IODE et conserver la dernière correction valide pendant l'attente, sinon le satellite disparaît et revient avec une ambiguïté neuve initialisée sur du code.
 - *Éclipses.* `yaw_angle()` est nominal ; exclure les satellites en éclipse en attendant les modèles.
 - *GLONASS.* Son biais code récepteur par canal contamine le STEC de chaque satellite en non-combiné : rester sans GLONASS jusqu'à ce qu'il soit modélisé.
+- *BeiDou GEO.* Les GEO (C01–C05, C59–C62) ont des orbites et des corrections nettement moins bonnes ; le code ne les distingue pas. Les exclure (`pos1-exclsats`) tant que le flux ne prouve pas le contraire.
+- *Rotation de l'antenne en cinématique.* `model_phw()` suppose l'antenne orientée au nord. Une rotation du porteur d'un angle θ ajoute θ/2π cycle à toutes les phases ; en iono-free c'est absorbé par l'horloge, mais en non-combiné la différence de longueur d'onde entre L1 et L2 laisse jusqu'à 5 cm par tour dans les biais de phase et le STEC. Sur un véhicule qui tourne, il faut soit un cap (compas, trajectoire) dans le wind-up récepteur, soit un état de biais de phase récepteur par fréquence.
+- *Doppler.* Le PPP n'a aucune détection de saut par Doppler (`detslp_dop()` n'existe que pour le RTK) ; à 1 Hz c'est le détecteur le plus robuste aux gros sauts et le moins sensible à l'iono. À porter dans `ppp.c`.
+- *Pondération SNR.* Le terme SNR de `varerr()` (`stats-errsnr`, `stats-snrmax`) existe et n'est pas utilisé dans les configs ; l'activer sur le code est la manière la moins coûteuse de dépondérer le multitrajet.
+
+**Les corrections elles-mêmes : intégrité du flux.** Le plan n'est pas complet si les corrections sont supposées justes. Aujourd'hui le code vérifie l'âge (90 s, binaire), la cohérence des IOD orbite/horloge, l'appariement d'IODE et des bornes grossières (10 m d'orbite, 300 m d'horloge). Il manque une surveillance et une réaction :
+- *Santé du flux* : cadence par type de message, latence (`now − t0`), trous, satellites présents, dans `$SSR` et en alarme si la cadence attendue n'est pas tenue.
+- *Sauts de correction* : d'une mise à jour à l'autre, un saut de `dclk` ou de `deph` au-delà de ce que la dérive et l'URA autorisent signale un problème côté fournisseur (nouvelle solution, satellite en manœuvre, IODE mal apparié). Réaction : quarantaine du satellite (exclu N minutes, ambiguïté et STEC réinitialisés au retour) plutôt que laisser l'ambiguïté absorber le saut. Même quarantaine pour un satellite rejeté à répétition (`rejc`), que le code compte mais n'exploite pas.
+- *Valeurs figées* : une correction répétée à l'identique sur plusieurs mises à jour est un fournisseur qui ne suit plus le satellite ; l'âge ne l'attrape pas.
+- *URA réellement utilisé* : la variance vient de `var_urassr(ssr->ura)`, alimentée par les messages URA (1061/1244/1262) ; si le CNES ne les émet pas, tous les satellites reçoivent 0.15 m sans distinction. Vérifier sur le flux ; sinon, dériver une variance par satellite de la surveillance des innovations.
+- *Cohérence avec le broadcast* : la différence orbite corrigée − orbite broadcast doit rester de l'ordre du mètre ; au-delà, l'éphéméride du rover ou la correction est mauvaise.
+- *Changement de fournisseur* (bascule CNES → IGS03 en secours) : datum d'horloge et biais différents ; il faut réinitialiser les ambiguïtés à la bascule, pas les laisser absorber le changement.
 
 **En aval : contrôler les ambiguïtés.**
 - *Pondération pendant la convergence.* Les premières minutes sont pilotées par le code ; un satellite bas avec 1–2 m de multitrajet fixe une ambiguïté fausse. Renforcer le poids d'élévation sur le code (ou masque de 15° sur le code seul) tant que la variance position dépasse ≈ 0.5 m².
@@ -78,7 +111,8 @@ Le chemin ci-dessous suit cet ordre. Chaque étape soit rend une erreur visible 
 **Pourquoi.** Une fois les biais satellite traités, ce qui reste en U est du modèle : troposphère, charge océanique, antenne. Ce sont des centimètres constants, invisibles pour `P`.
 
 **À faire.**
-- *Troposphère.* `trop_model_prec()` prend un ZHD par atmosphère standard et NMF (`IERS_MODEL` OFF par défaut). Passer à un a priori GPT3 (pression, température réelles au lieu de l'atmosphère standard) et GMF ou VMF ; réduire la variance initiale du ZTD (`VAR_ZTD = 0.6²`) quand l'a priori est bon ; `prntrop` ≈ 5e-5 m/√s.
+- *Troposphère.* `trop_model_prec()` prend un ZHD par atmosphère standard et NMF (`IERS_MODEL` OFF par défaut). Passer à un a priori GPT3 (pression, température réelles au lieu de l'atmosphère standard) et GMF ou VMF ; réduire la variance initiale du ZTD (`VAR_ZTD = 0.6²`) quand l'a priori est bon ; `prntrop` ≈ 5e-5 m/√s en statique, plus grand en cinématique quand l'altitude change (le ZHD est recalculé à chaque époque avec la position courante, le ZWD estimé ne l'est pas).
+- *Séparer ZTD, hauteur et horloge.* Ces trois états sont corrélés ; ce qui les sépare, ce sont les satellites bas correctement pondérés. Un masque à 10° avec une pondération d'élévation réaliste vaut mieux qu'un masque à 15° : l'étape 2 (pondération pendant la convergence) ne doit pas se traduire par une coupure définitive des satellites bas en phase.
 - *Charge océanique.* `rtkrcv` ne lit jamais de BLQ : le bit OTL de `tidecorr` est sans effet en temps réel, et un BLQ par site est impossible quand le lieu change. Embarquer un modèle global sur grille (FES2014b ou équivalent, onze ondes) dans `tides.c`. Près des côtes, c'est 3 à 5 cm en hauteur, l'objectif entier.
 - *Antenne.* ANTEX du même repère que les corrections (`igs20.atx`), type d'antenne exact dans `ant1-anttype` (pas d'en-tête RINEX en temps réel), ARP renseigné.
 
@@ -96,6 +130,8 @@ Le chemin ci-dessous suit cet ordre. Chaque étape soit rend une erreur visible 
 3. *Calibration matérielle persistée* : DCB, ISB, IFB sont propres au récepteur, stables sur des jours, indépendants du lieu. Les sauvegarder et les recharger avec une variance modérée (≈ 0.3 m) : c'est la seule chose qu'un démarrage à froid a le droit d'hériter.
 4. *Contrainte VTEC continue.* Aujourd'hui le VTEC 1264 n'initialise les STEC qu'avec une variance fixe de 100 m² (`VAR_SSR_VTEC`, `src/ionex.c:24`), donc sans aucun poids, et son indicateur de qualité `qi` (décodé en TECU, `src/rtcm3.c:2120`) n'est pas utilisé. Ajouter dans `ppp_res()` une pseudo-observation par satellite sur l'état STEC, de variance `(max(qi, 1 TECU) × 0.1624 m/TECU × mapping)²` bornée entre ≈ 0.2 m et ≈ 1 m, désactivée si le message a plus de deux fois son intervalle de mise à jour. C'est le levier de vitesse.
 5. *Bruit STEC adaptatif* : `prniono` plus grand les premières minutes et fonction de l'activité mesurée.
+6. *Cohérence des fonctions de mapping.* L'état STEC est un délai vertical ramené par `ionmapf()` (couche unique à 350 km) ; le VTEC 1264 porte ses propres hauteurs de couche. La contrainte doit utiliser la même géométrie que l'état, et sa variance croître à basse élévation où l'erreur de mapping atteint 5 à 10 %.
+7. *Iono d'ordre deux.* Quelques mm à 2 cm en forte activité ; en non-combiné le terme diffère par fréquence et se répercute sur le STEC estimé et la position. À calculer depuis le VTEC et un champ magnétique dipolaire, une fois les étapes 1 à 3 acquises.
 
 **Critère de sortie.** Sur la campagne : 5 à 10 minutes pour passer sous 10 cm horizontal, 10 à 20 minutes pour 5 cm 3D, à toutes les fenêtres, ratio erreur/σ toujours ≈ 1.
 
@@ -120,9 +156,9 @@ La stratégie cohérente avec « IAR en dernier recours » : le float reste la s
 
 | Étape | Ce qu'elle apporte | Où dans le code | Critère de sortie mesuré |
 |---|---|---|---|
-| 0 Instrument | Rejeu à l'identique, erreur et ratio erreur/σ par session | logs `rtkrcv`, `rnx2rtkp` + `.rtcm3`, script de scoring | Chaque session est mesurable |
+| 0 Instrument | Rejeu fidèle, erreur et ratio erreur/σ par session, visibilité satellite par satellite | logs horodatés `::T` + rejeu `rtkrcv`, `rnx2rtkp` + `.rtcm3`, repère de la vérité, `simobs`, enregistrements `$FLT/$INNO/$AMB/$SSR/$VTEC/$EVT`, scoring, non-régression | Chaque session est mesurable et explicable |
 | 1 Honnêteté | `P` reflète l'erreur réelle | `varerr()`, `filter_()` (NIS), `prnbias`, sortie σ, détecteur de convergence | 95 % des erreurs < 2σ |
-| 2 Biais satellite | Plus de plateau à 20 cm dans une direction aléatoire | biais de code par signal, PCO/fréquence, IODE, `-DIS_FCB`, test d'innovation normalisé, cohérence des ambiguïtés, MW/GF, séparation de solutions | Convergence monotone, erreurs résiduelles annoncées |
+| 2 Biais satellite | Plus de plateau à 20 cm dans une direction aléatoire | entrées : biais de code par signal, PCO/fréquence, IODE, `-DIS_FCB`, GEO BDS, wind-up récepteur, Doppler, SNR ; corrections : santé du flux, sauts, valeurs figées, URA, quarantaine ; contrôle : test d'innovation normalisé, cohérence des ambiguïtés, MW/GF, séparation de solutions | Convergence monotone, erreurs résiduelles annoncées |
 | 3 Biais hauteur | U sans biais | GPT3 + GMF/VMF, OTL global dans `tides.c`, ANTEX/ARP | Biais U < 2 cm |
 | 4 Vitesse | 5 cm 3D en 10–20 min à froid | DCB récepteur, ISB, calibration persistée, contrainte VTEC avec `qi`, STEC adaptatif | Temps de convergence sur toutes les fenêtres |
 | 5 Tenue | Une convergence acquise ne se perd pas | `maxout` temporel, âge SSR en variance, IODE | Coupures simulées absorbées ou annoncées |
