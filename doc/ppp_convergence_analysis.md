@@ -261,3 +261,46 @@ Chaque lancement se fait ailleurs, dans d'autres conditions, sans état antérie
 
 Avec SC-1, SC-2, SC-3, la tropo et l'anti-plateau : convergence float monotone, 5–10 min sous 10 cm horizontal, 10–20 min pour 5 cm 3D, sans plateau biaisé. C'est la limite physique du float avec un VTEC global à quelques TECU : la composante hauteur et la séparation ambiguïté/ZTD ne se font que par le mouvement de la géométrie. Obtenir 5 cm 3D en moins de 5 min à froid, à tous les coups, n'est pas accessible en float. C'est précisément ce que les biais de phase du flux CNES permettent : WL fixée en 1–2 min, NL en 3–8 min, puis 2–3 cm. La stratégie cohérente avec « IAR en dernier recours » est donc : un float rendu fiable (sections 5, 10, 11, 12), et une AR **de confirmation** qui ne remplace le float que si le fix est cohérent avec lui (écart fix/float sous 3σ, ratio validé), et retombe sur le float sinon. Le float reste la solution de référence, l'AR ne fait qu'en raccourcir la fin.
 
+## 13. σ annoncé 3 cm, erreur réelle 20 cm : rendre l'estimation d'erreur cohérente
+
+Symptôme : le filtre annonce 3 cm (`sdn/sde/sdu` dans le `.pos`, issus de `sol.qr` = diagonale de `P`, `src/ppp.c:1166`), la réalité est à 10–20 cm sur E, N ou U selon la session. Ce n'est pas un défaut de réglage isolé : la covariance d'un EKF ne contient que ce qui a été déclaré dans `R` (bruit de mesure) et `Q` (bruit de processus), et elle suppose chaque époque indépendante. Toute erreur **constante ou lentement variable** qui n'est pas un état du filtre est invisible pour `P`, et la moyenne sur N époques la fait « disparaître » de `P` en 1/√N alors qu'elle reste entière dans la position.
+
+### 13.1 Le mécanisme dans le code
+
+| Source d'erreur corrélée dans le temps | Comment le code la traite | Effet sur σ |
+|---|---|---|
+| Orbite/horloge SSR : erreur de 3–5 cm par satellite, corrélée sur 5–30 min | `var_rs[i]` (URA SSR) ajouté à `var[nv]` **à chaque époque** comme bruit blanc (`src/ppp.c:1090`) | à 1 Hz, 600 époques en 10 min : la contribution à `P` est divisée par ≈ 24, l'erreur réelle ne bouge pas |
+| Multitrajet phase (corrélé 1–10 min) et code (corrélé plusieurs minutes) | `varerr()` : `a + b/sin(el)` blanc, 3 mm phase, 0.3 m code | idem : `P` converge en quelques minutes vers des mm formels |
+| Ambiguïté float biaisée par le code des premières minutes | état constant + `prnbias = 1e-4 m/√s` (`src/ppp.c:828`) ; rien ne la remet en cause hors saut de cycle | la position se cale sur l'ambiguïté fausse, `P` la croit bonne |
+| Biais de code satellite manquant ou faux (signal non couvert), PCO fréquence, IODE, éclipse | erreur constante sur **un** satellite, absorbée par son ambiguïté et sa position projetée | biais de position dans la direction du satellite, tous les autres résidus semblent bons |
+| ZHD a priori, mapping, charge océanique absente (`rtkrcv` sans BLQ) | pas d'état, pas de variance | biais hauteur pur, σ_U formel inchangé |
+| Bruit de processus trop faible (`prntrop`, `prnpos=0` en statique) | filtre rigide | le filtre ne peut plus corriger un biais entré tôt |
+
+Conséquence : la valeur 3 cm est une **précision formelle**, jamais une exactitude. Elle sera toujours optimiste tant que (a) le modèle n'est pas complet et (b) la corrélation temporelle des erreurs n'est pas représentée. Les sections 5, 10, 11 et 12 traitent (a) ; cette section traite (b) et les contrôles indépendants.
+
+### 13.2 Rendre `P` honnête
+
+**CV-1 (P0). Bruit de mesure à durée de corrélation.** À 1 Hz, une observation n'apporte pas une information nouvelle indépendante à chaque seconde. Deux implémentations équivalentes : n'utiliser que les époques à 10–30 s pour la mise à jour de covariance, ou, plus simple et sans perdre la solution 1 Hz, multiplier `R` par `max(1, τ/Δt)` avec `τ` = temps de corrélation (phase 30–60 s, code 60–120 s). Dans `varerr()` (`src/ppp.c:~360`), un facteur `opt->err[...]` supplémentaire suffit. C'est le correctif le plus efficace sur la cohérence σ/erreur ; il ralentit la décroissance formelle de `P` sans changer la position.
+
+**CV-2 (P0). Erreurs orbite/horloge SSR comme processus corrélé, pas comme bruit blanc.** Soit un état de Gauss-Markov d'ordre 1 par satellite (τ ≈ 15 min, σ² = `var_urassr`) ajouté au résidu de phase et de code (`+MAXSAT` états), soit, à moindre coût, transférer cette incertitude dans le bruit de processus de l'ambiguïté (`prnbias` de 1e-4 à ≈ 1e-3 m/√s) pour que l'ambiguïté puisse suivre la dérive d'horloge SSR et que `P` la garde. À évaluer sur le rejeu (section 10.4) : l'objectif est un ratio erreur/σ proche de 1, pas un σ minimal.
+
+**CV-3 (P0). Facteur de variance a posteriori et test NIS.** Après chaque `filter()`, calculer la statistique d'innovation normalisée `vᵀ (H P Hᵀ + R)⁻¹ v / nv` (la matrice est déjà formée dans `filter_()`, `src/rtkcmn.c`, il suffit de l'exposer) et son moyennage exponentiel sur 5 min. Si elle dépasse durablement 1, c'est que `R` ou `Q` sous-estiment la réalité : gonfler `R` (adaptatif) ou, a minima, publier `sol.qr × s²`. Ajouter `s²` et le NIS dans le `.stat`.
+
+**CV-4 (P0). Contrôle de cohérence des ambiguïtés** (section 12.2, point 3) : c'est la seule défense contre le biais d'un seul satellite. Chaque ambiguïté est comparée en continu à `L − P` lissé (corrigé du STEC) ; un écart persistant > 3σ réinitialise l'ambiguïté avec sa variance initiale, ce qui **augmente honnêtement `P`** au lieu de laisser le biais.
+
+**CV-5 (P1). Séparation de solutions (intégrité).** Calculer en parallèle, à faible coût, des sous-solutions (GPS seul, Galileo seul, ou « tous sauf un satellite » pour les N satellites les plus pondérés) et comparer à la solution complète. Un écart supérieur à ce que les covariances prédisent signale un biais non modélisé ; on gonfle σ et on retire le satellite responsable. Sans ce type de contrôle, aucun filtre ne peut détecter un biais cohérent avec ses propres résidus.
+
+**CV-6 (P1). σ empirique calibré sur le temps depuis le démarrage.** À partir de la campagne de validation (sections 7 et 10.4), ajuster une courbe `σ_emp(t, composante)` (par exemple `a + b·exp(−t/τ)`) sur l'erreur réelle observée, par composante E/N/U, et publier `max(σ_formel × s, σ_emp(t))`. C'est la garantie pragmatique de cohérence tant que CV-1 à CV-5 ne sont pas déployés, et un garde-fou ensuite.
+
+**CV-7 (P1). Détecteur de convergence** (RT-8, 12.2 point 5) : ne jamais publier « convergé » sur la seule diagonale de `P`. Conditions cumulatives : σ formel × s² sous seuil, NIS ≈ 1 sur 5 min, ≥ 6 satellites avec ambiguïté âgée de plus de N minutes, stabilité de la position sur 60 s < 3 cm, aucune réinitialisation d'ambiguïté récente.
+
+### 13.3 Diagnostiquer vos sessions à 20 cm
+
+Le fait que la composante fautive change d'une session à l'autre (E, N ou U) désigne une erreur **par satellite** projetée sur la géométrie du moment, plutôt qu'une erreur systématique de modèle (qui frapperait toujours U). Sur les logs rover + SSR rejoués (section 10.4), avec `out-outstat=residual` :
+
+1. Tracer par satellite `$SAT` (résidus phase, `lock`, `slipc`, `rejc`) et `$ION` ; un satellite dont le résidu de phase est petit mais dont l'ambiguïté a été initialisée pendant un pic de résidu de code est le suspect habituel.
+2. Retirer le satellite suspect (`pos1-exclsats`) et rejouer : si l'erreur disparaît, c'est un biais satellite (biais de code du signal, PCO, IODE, éclipse) ou une ambiguïté initialement biaisée.
+3. Si l'erreur est toujours en U : ZHD/mapping, charge océanique (absente en temps réel), antenne (PCO/ARP) ; comparer `$TROP` à un ZTD de référence.
+4. Comparer la même session en `est-stec` et en `dual-freq` : un écart de plusieurs cm signe un problème de biais de code ou de STEC, pas de géométrie.
+5. Calculer sur toutes les sessions le ratio erreur/σ par composante : c'est la métrique à suivre ; l'objectif est une distribution proche de χ² (95 % des erreurs sous 2σ), pas un σ petit.
+
