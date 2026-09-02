@@ -9,9 +9,7 @@ Objectif visé par le PE (moteur de positionnement bâti sur `rtkpos()`/`pppos()
 1. **Mise à jour faite** : le dépôt a été avancé (fast-forward, aucune divergence locale) sur `upstream/main` : 173 commits, 107 fichiers. Côté PPP, upstream a ajouté depuis notre base : détection de sauts de cycle multi-fréquence en PPP, modèle VTEC (SSR 1264) pour initialiser les états iono, biais de code appliqués en absolu (OSB), correction `satposs()` pour les horloges SP3, mise à jour des IODE SSR. Compilation vérifiée (`rnx2rtkp`, CMake).
 2. **Trois bugs corrigés** dans cette branche (section 4) : indexation fausse dans `udiono_ppp()` (deux occurrences) et variance d'horloge broadcast écrite sur le mauvais satellite dans `satposs()`.
 3. **Constat principal** : le PPP de RTKLIB-EX est un PPP float iono-free "classique" (Takasu 2.4.3) : pas de PPP-AR (`ppp_ar.c` est un stub), pas de contrainte ionosphérique externe, pas de modélisation des ISB (biais inter-systèmes réinitialisés à chaque époque), pas de reprise d'état entre deux lancements, PCO satellites figés sur L1/L2, table de biais de code incomplète (pas de GPS L5, BDS-3, QZSS). Chacun de ces points coûte soit du temps de convergence, soit un biais résiduel float.
-4. **Ce qui permet d'atteindre "≤ 5 cm à chaque lancement" en float** :
-   - en **post-traitement** : le combiné forward/backward (`pos1-soltype=combined`) existe déjà et supprime la période de convergence ; il faut surtout des modèles/produits corrects (configs `data/config/ppp_static_igs.conf` et `ppp_kine_igs.conf` livrées) ;
-   - en **forward / temps réel**, il faut ajouter au code : (P0-1) reprise d'état persistante (warm start), (P0-2) PPP non-combiné contraint par un modèle iono externe, (P0-3) biais OSB complets et cohérents, (P0-4) états ISB à marche aléatoire, (P0-5) PCO satellites cohérents avec la combinaison utilisée. Détail et pointeurs code en section 5.
+4. **Cible : temps réel avec `rtkrcv` et un flux SSR** (section 10). Le combiné forward/backward ne s'applique donc qu'au rejeu de validation. Pour atteindre "≤ 5 cm à chaque lancement" en float temps réel, il faut ajouter au code : (RT-1/P0-1) reprise d'état persistante (warm start) branchée dans `rtksvrstart/stop`, (RT-2) gestion des transitions d'IODE SSR, (RT-4) survie aux coupures de flux sans perdre les ambiguïtés, (P0-2/RT-5) PPP non-combiné contraint par le VTEC SSR 1264 déjà décodé, (P0-3) biais OSB complets et cohérents, (P0-4) états ISB à marche aléatoire, (P0-5) PCO satellites cohérents avec la combinaison utilisée. Configs livrées : `app/consapp/rtkrcv/conf/ppp_ssr_rt.conf` (temps réel) et `data/config/ppp_static_igs.conf` / `ppp_kine_igs.conf` (rejeu, post-traitement).
 5. Aucun jeu de données avec produits précis (SP3/CLK) n'est accessible depuis cet environnement (réseau limité à GitHub) : les configs ont été validées pour le chargement et l'exécution (mode broadcast), pas sur une convergence réelle. Le protocole de validation à dérouler est en section 7.
 
 ## 1. Mise à jour du dépôt
@@ -142,6 +140,51 @@ Produits à fournir : SP3 + CLK 30 s (finaux ou rapides IGS/CODE/GFZ/WHU), fichi
 
 ## 9. Limites de cette analyse
 
-- Pas de run PPP avec produits précis possible ici (pas d'accès aux serveurs IGS depuis le bac à sable) : les ordres de grandeur de la section 3 viennent de la littérature et de l'expérience PPP, pas d'une mesure sur ce code.
+- Pas de run PPP avec produits précis ni flux SSR possible ici (pas d'accès aux serveurs IGS depuis le bac à sable) : les ordres de grandeur de la section 3 viennent de la littérature et de l'expérience PPP, pas d'une mesure sur ce code.
 - Les valeurs de bruit de processus proposées (section 6) sont des points de départ à régler sur les données du PE.
 - Les corrections de la section 4 ont été validées par compilation et exécution en mode broadcast, sans jeu de référence.
+
+## 10. Temps réel avec rtkrcv (cible principale)
+
+Le PE tourne en temps réel : pas de combiné forward/backward, et les produits sont un flux SSR RTCM3 (ou des SP3/CLK ultra-rapides chargés par ftp/http en mode `precise`, dont la moitié prédite des horloges est trop bruitée pour l'objectif). Ce que le code fait aujourd'hui, puis ce qui manque.
+
+### 10.1 Chaîne temps réel dans le code
+
+- Flux : `inpstr1` rover, `inpstr3` corrections. `decoderaw()` → `update_ssr()` (`src/rtksvr.c:314`) ne copie une correction dans `nav.ssr` que si son drapeau `update` est levé **et** si son IODE correspond à l'éphéméride courante ou précédente reçue du rover ; sinon elle est ignorée.
+- `satpos_ssr()` (`src/ephemeris.c`) : orbite broadcast + ΔR/A/C, horloge broadcast + polynôme SSR, âge maximal 90 s (`MAXAGESSR`), 10 s pour l'horloge haute cadence, variance issue de l'URA SSR (`DEFURASSR` 0.15 m si absent). `brdc+ssrapc` = corrections référencées au centre de phase (IGS, CNES), `brdc+ssrcom` ajoute `satantoff()`.
+- Biais de code SSR (1059/1242/1260) : appliqués dans `corr_meas()` pour le PPP, pas dans la SPP (`prange()`).
+- Biais de phase SSR (1265–1270) : appliqués aux observations par `corr_phase_bias()` sauf `misc-pppopt=-DIS_FCB` ; `decode_ssr7()` ne lève pas `update` et ignore le compteur de discontinuité `sdc`.
+- VTEC (1264) : décodé et copié dans `nav.vtec`, utilisé uniquement pour initialiser les états iono.
+- Persistance : à l'arrêt `rtkrcv` sauvegarde les éphémérides (`savenav()`, `rtkrcv.nav`) et les relit au démarrage (`readnav()`), rien pour l'état du filtre ; `restart` → `rtkinit()`.
+- Galileo : `setseleph(SYS_GAL,1)` force l'I/NAV en mode SSR ; le récepteur doit donc sortir l'I/NAV et le fournisseur SSR doit s'y référer (cas IGS et CNES).
+- Rejeu : `rnx2rtkp` accepte un fichier `.rtcm3` de corrections SSR (`readpreceph()`), donc un log rover + un log SSR (`logstr1`, `logstr3`) rejouent exactement la session temps réel.
+
+### 10.2 Points spécifiques temps réel, à ajouter aux P0/P1
+
+**RT-1 (P0). Warm start.** C'est le chantier n° 1 en temps réel. Brancher `pppsavestate()/pppload­state()` dans `rtksvrstart()`/`rtksvrstop()` à côté de `readnav()/savenav()` (`app/consapp/rtkrcv/rtkrcv.c:1933,1988`), plus un point de reprise périodique (toutes les 30 s) pour survivre à un crash ou un `restart`. Restauration conditionnelle : âge de l'état, continuité de phase par satellite (LLI, GF, MW), sinon seules position/ZTD/ISB sont reprises.
+
+**RT-2 (P0). Transitions d'IODE.** `update_ssr()` n'accepte que deux jeux d'éphémérides (courant, précédent). Galileo change d'IODnav toutes les 10 min, GPS toutes les 2 h : à chaque transition la correction est perdue jusqu'à ce que rover et flux soient alignés, ce qui crée des trous de plusieurs dizaines de secondes par satellite ; `outc` monte et l'ambiguïté est réinitialisée au-delà de `maxout`. Garder un historique d'au moins quatre IODE par satellite, conserver la dernière correction valide pendant l'attente (l'âge la borne déjà) et journaliser les trous par satellite.
+
+**RT-3 (P0). Biais de phase SSR en float.** Ne pas les appliquer (`-DIS_FCB`) : toute discontinuité passe inaperçue et casse l'ambiguïté. Pour l'AR future : lever `update` dans `decode_ssr7()`, exploiter `sdc` pour réinitialiser l'ambiguïté concernée.
+
+**RT-4 (P0). Coupures de flux sans perte des ambiguïtés.** `maxout` est compté en époques (`++outc` à chaque époque dans `udbias_ppp()`) : à 1 Hz, `pos2-aroutcnt=20` vaut 20 s. Une coupure NTRIP ou récepteur de deux minutes efface toutes les ambiguïtés et relance la convergence. Rendre le seuil temporel (secondes), et au retour conserver l'ambiguïté avec variance gonflée de `prnbias²·Δt` tant qu'aucun saut de cycle n'est détecté ; avec RT-1 la coupure est absorbée.
+
+**RT-5 (P0). Contrainte iono par le VTEC 1264** : c'est P0-2 avec une source déjà disponible dans `nav.vtec` ; pseudo-observations dans `ppp_res()`, variance dérivée de la qualité du message et de l'élévation.
+
+**RT-6 (P1). Latence.** Horloges SSR mises à jour toutes les 5 s (IGS03, CNES), latence NTRIP de 2 à 5 s : `MAXAGESSR=90` s convient, mais remplacer le seuil binaire par une variance croissante avec l'âge (comme `EXTERR_CLK` en mode `precise`).
+
+**RT-7 (P1). Choix du flux.** IGS03 : GPS+GLONASS, ≈ 3 cm orbite / 0.15 ns horloge. SSRA00CNE0 (CNES) : GPS/GAL/GLO/BDS, biais code et phase, VTEC 1264. À froid, compter 15–30 min de convergence float ; avec RT-1 et RT-5, quelques minutes.
+
+**RT-8 (P1). Indicateur de convergence en sortie.** `out-maxsolstd` permet de ne publier que sous un écart-type filtre (optimiste) ; ajouter dans `sol_t` un critère fondé sur l'âge médian des ambiguïtés et le nombre de satellites matures.
+
+**RT-9 (P2).** `prange()` n'applique pas les biais SSR dans la SPP (impact limité au filtrage `vs`) ; mesurer le temps par époque sur la cible embarquée en `est-stec` (≈ 300 états).
+
+### 10.3 Config rtkrcv livrée
+
+`app/consapp/rtkrcv/conf/ppp_ssr_rt.conf` : rover sur `inpstr1`, SSR NTRIP sur `inpstr3`, `pos1-sateph=brdc+ssrapc`, `l1+l2`, GPS+GAL+BDS, ZTD + gradients, marées solides + OTL, `misc-pppopt=-DIS_FCB`, `pos2-aroutcnt=120` (2 min à 1 Hz), `misc-navmsgsel=rover` (éphémérides du seul rover pour l'appariement d'IODE), `ant1-anttype` à renseigner explicitement (pas d'en-tête RINEX en temps réel), logs rover et SSR activés pour le rejeu. Chargement vérifié avec `rtkrcv -o`.
+
+### 10.4 Validation temps réel
+
+1. Enregistrer rover + SSR (`logstr1`, `logstr3`) sur une antenne de coordonnées connues, 24 h.
+2. Rejouer avec `rnx2rtkp` (RINEX du rover + `.rtcm3` SSR, `sateph=brdc+ssrapc`) en fenêtres de 1 h à froid : mêmes métriques qu'en section 7.
+3. Tester `stop`/`start` et coupures de flux simulées (10 s, 2 min, 10 min) : la reprise doit rester sous 5 cm après RT-1 et RT-4.
