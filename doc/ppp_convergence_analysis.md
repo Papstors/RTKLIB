@@ -9,7 +9,7 @@ Objectif visé par le PE (moteur de positionnement bâti sur `rtkpos()`/`pppos()
 1. **Mise à jour faite** : le dépôt a été avancé (fast-forward, aucune divergence locale) sur `upstream/main` : 173 commits, 107 fichiers. Côté PPP, upstream a ajouté depuis notre base : détection de sauts de cycle multi-fréquence en PPP, modèle VTEC (SSR 1264) pour initialiser les états iono, biais de code appliqués en absolu (OSB), correction `satposs()` pour les horloges SP3, mise à jour des IODE SSR. Compilation vérifiée (`rnx2rtkp`, CMake).
 2. **Trois bugs corrigés** dans cette branche (section 4) : indexation fausse dans `udiono_ppp()` (deux occurrences) et variance d'horloge broadcast écrite sur le mauvais satellite dans `satposs()`.
 3. **Constat principal** : le PPP de RTKLIB-EX est un PPP float iono-free "classique" (Takasu 2.4.3) : pas de PPP-AR (`ppp_ar.c` est un stub), pas de contrainte ionosphérique externe, pas de modélisation des ISB (biais inter-systèmes réinitialisés à chaque époque), pas de reprise d'état entre deux lancements, PCO satellites figés sur L1/L2, table de biais de code incomplète (pas de GPS L5, BDS-3, QZSS). Chacun de ces points coûte soit du temps de convergence, soit un biais résiduel float.
-4. **Cible : temps réel avec `rtkrcv` et un flux SSR** (section 10). Le combiné forward/backward ne s'applique donc qu'au rejeu de validation. Pour atteindre "≤ 5 cm à chaque lancement" en float temps réel, il faut ajouter au code : (RT-1/P0-1) reprise d'état persistante (warm start) branchée dans `rtksvrstart/stop`, (RT-2) gestion des transitions d'IODE SSR, (RT-4) survie aux coupures de flux sans perdre les ambiguïtés, (P0-2/RT-5) PPP non-combiné contraint par le VTEC SSR 1264 déjà décodé, (P0-3) biais OSB complets et cohérents, (P0-4) états ISB à marche aléatoire, (P0-5) PCO satellites cohérents avec la combinaison utilisée. Configs livrées : `app/consapp/rtkrcv/conf/ppp_ssr_rt.conf` (temps réel) et `data/config/ppp_static_igs.conf` / `ppp_kine_igs.conf` (rejeu, post-traitement).
+4. **Cible : temps réel avec `rtkrcv`, PPP non-combiné (`est-stec`) et le flux CNES SSRA00CNE0** (sections 10 et 11). Le combiné forward/backward ne s'applique donc qu'au rejeu de validation. Pour atteindre "≤ 5 cm à chaque lancement" en float temps réel, il faut ajouter au code : (RT-1/P0-1) reprise d'état persistante (warm start) branchée dans `rtksvrstart/stop`, (RT-2) gestion des transitions d'IODE SSR, (RT-4) survie aux coupures de flux sans perdre les ambiguïtés, (P0-2/RT-5) PPP non-combiné contraint par le VTEC SSR 1264 déjà décodé, (P0-3) biais OSB complets et cohérents, (P0-4) états ISB à marche aléatoire, (P0-5) PCO satellites cohérents avec la combinaison utilisée. Hypothèse `est-stec` : le VTEC 1264 est aujourd'hui utilisé avec une variance fixe de 100 m² (aucun poids) et son indicateur de qualité est ignoré ; il manque un état DCB récepteur par système, indispensable dès que le STEC est contraint. Configs livrées : `app/consapp/rtkrcv/conf/ppp_ssr_rt.conf` (temps réel, `est-stec`) et `data/config/ppp_static_igs.conf` / `ppp_kine_igs.conf` (rejeu, post-traitement).
 5. Aucun jeu de données avec produits précis (SP3/CLK) n'est accessible depuis cet environnement (réseau limité à GitHub) : les configs ont été validées pour le chargement et l'exécution (mode broadcast), pas sur une convergence réelle. Le protocole de validation à dérouler est en section 7.
 
 ## 1. Mise à jour du dépôt
@@ -181,10 +181,54 @@ Le PE tourne en temps réel : pas de combiné forward/backward, et les produits 
 
 ### 10.3 Config rtkrcv livrée
 
-`app/consapp/rtkrcv/conf/ppp_ssr_rt.conf` : rover sur `inpstr1`, SSR NTRIP sur `inpstr3`, `pos1-sateph=brdc+ssrapc`, `l1+l2`, GPS+GAL+BDS, ZTD + gradients, marées solides + OTL, `misc-pppopt=-DIS_FCB`, `pos2-aroutcnt=120` (2 min à 1 Hz), `misc-navmsgsel=rover` (éphémérides du seul rover pour l'appariement d'IODE), `ant1-anttype` à renseigner explicitement (pas d'en-tête RINEX en temps réel), logs rover et SSR activés pour le rejeu. Chargement vérifié avec `rtkrcv -o`.
+`app/consapp/rtkrcv/conf/ppp_ssr_rt.conf` : rover sur `inpstr1`, flux CNES SSRA00CNE0 sur `inpstr3`, `pos1-sateph=brdc+ssrapc`, `pos1-ionoopt=est-stec`, `l1+l2`, GPS+GAL+BDS (pas de GLONASS, voir 11.1), ZTD + gradients, marées solides + OTL, `stats-prniono=0.002`, `misc-pppopt=-DIS_FCB -GAP_RESION=120`, `pos2-aroutcnt=120` (2 min à 1 Hz), `misc-navmsgsel=rover` (éphémérides du seul rover pour l'appariement d'IODE), `ant1-anttype` à renseigner explicitement (pas d'en-tête RINEX en temps réel), logs rover et SSR activés pour le rejeu. Chargement vérifié avec `rtkrcv -o`.
 
 ### 10.4 Validation temps réel
 
 1. Enregistrer rover + SSR (`logstr1`, `logstr3`) sur une antenne de coordonnées connues, 24 h.
 2. Rejouer avec `rnx2rtkp` (RINEX du rover + `.rtcm3` SSR, `sateph=brdc+ssrapc`) en fenêtres de 1 h à froid : mêmes métriques qu'en section 7.
 3. Tester `stop`/`start` et coupures de flux simulées (10 s, 2 min, 10 min) : la reprise doit rester sous 5 cm après RT-1 et RT-4.
+
+## 11. Hypothèse retenue : PPP non-combiné (`est-stec`) avec le flux CNES
+
+Le flux SSRA00CNE0 (CNES PPP-WIZARD) apporte orbites et horloges GPS/GAL/GLO/BDS, biais de code et de phase par signal, et le VTEC en harmoniques sphériques (1264). C'est la configuration qui permet un PPP non-combiné contraint, donc la convergence float la plus rapide sans AR. Ce que le code fait en `est-stec`, et ce qui doit changer.
+
+### 11.1 Le mode `est-stec` dans le code
+
+| Point | État actuel | Conséquence |
+|---|---|---|
+| États | position, horloge par système, ZTD + gradients, un STEC par satellite (`II`), DCB récepteur L5 seulement (`ID`, si `nf≥3`), biais de phase par fréquence et satellite (`IB(s,f)`) | ≈ 300 états avec `MAXSAT` ; `filter()` compresse les états nuls |
+| Observations | code et phase bruts par fréquence, coefficient iono `C=±(f1/f)²`, pas d'amplification ×3 du bruit | modèle plus riche, mais le rang dépend des biais récepteur (ci-dessous) |
+| Init STEC | `udiono_ppp()` : VTEC 1264 via `ionvtec()` si présent, sinon `(P1−P2)` corrigé des biais ; variance fixe `VAR_SSR_VTEC = SQR(10.0)` (`src/ionex.c:24`) ; l'indicateur de qualité `qi` (décodé en TECU, `src/rtcm3.c:2120`) n'est pas utilisé | le VTEC n'a **aucun poids** : il ne fait qu'initialiser, la convergence reste celle d'un PPP non contraint |
+| Marche aléatoire STEC | `prn[1]/sin(el)` (`stats-prniono`) | à régler : 0.001 iono calme, 0.003–0.005 iono active ou mobile rapide |
+| Utilisation d'un satellite | seulement si son état STEC est initialisé (`ppp_res()` : `x[II]==0` → ignoré) | sans VTEC, il faut les deux codes |
+| Biais de code SSR | appliqués par signal dans `corr_meas()` avec un index direct par code : toutes les fréquences envoyées par le CNES sont couvertes (contrairement à la table fichier de `init_bias_ix()`) | OK en temps réel ; la SPP (`prange()`) ne les applique pas |
+| Biais de phase SSR | `-DIS_FCB` recommandé en float (RT-3) | sans effet sur le float non-combiné |
+| DCB récepteur | absent (sauf L5). Le biais P1−P2 du récepteur (plusieurs ns, soit ≈ 1 m) est absorbé par les STEC et l'horloge | invisible tant que le STEC est libre ; **dès que le STEC est contraint au VTEC, il ressort en résidu de code et biaise la solution** |
+| GLONASS | IFB code récepteur par canal non modélisé | en non-combiné il contamine le STEC de chaque satellite GLONASS ; exclure GLONASS (`navsys=41`) tant que ce n'est pas modélisé |
+| PCO satellite | `satantoff()` applique le PCO de la combinaison IF L1/L2 à la position du satellite, quelle que soit la fréquence | en non-combiné, chaque fréquence devrait recevoir `ΔPCO_f = PCO_f − PCO_IF` (mm à cm sur GAL/BDS) |
+| Init biais de phase L1 | `udbias_ppp()` : pour `f=0`, `ion=0`, donc `bias = L1 − P1` biaisé de `2·I1` (mètres) avec `VAR_BIAS = 60²` | correct grâce à la variance initiale, mais l'état STEC déjà initialisé permettrait une init cohérente |
+| Pondération L5 | `EFACT_GPS_L5 = 10` sur GPS/QZS L5 en non-combiné | à revoir si L5 est ajouté (IFCB) |
+
+### 11.2 Chantiers spécifiques `est-stec` + CNES
+
+**SC-1 (P0). Contrainte VTEC continue.** À chaque époque, dans `ppp_res()`, une pseudo-observation par satellite sur `II(sat)` : `v = ion_vtec − x[II]`, `H = 1`, variance `σ² = (max(qi, 1 TECU) × 0.1624 m/TECU × mapping)²` bornée (plancher ≈ 0.2 m, plafond ≈ 1 m) et inflatée à basse élévation. Utiliser `qi` et `udint` (ne pas contraindre si l'âge du 1264 dépasse 2 × `udint`). Remplacer `VAR_SSR_VTEC` par cette variance pour l'initialisation. C'est P0-2 / RT-5 concrétisé avec la source CNES.
+
+**SC-2 (P0). DCB récepteur par système, préalable à SC-1.** Un état constant (marche aléatoire très faible) par système, `H = 1` sur le code de la seconde fréquence (convention : biais nul sur le code de première fréquence, absorbé par l'horloge), init 0 avec variance (1 m)². Sans lui, la contrainte VTEC transfère le DCB récepteur dans la position. Généraliser `uddcb_ppp()`/`ID()` (aujourd'hui limité au L5).
+
+**SC-3 (P0). ISB en marche aléatoire** (P0-4), indispensable en multi-GNSS non-combiné.
+
+**SC-4 (P1). PCO satellite par fréquence** en mode non-combiné (`corr_meas()`, `satantpcv()`), cohérent avec le datum APC du CNES.
+
+**SC-5 (P1). Init du biais de phase cohérente avec le STEC** : `bias_f = L_f − P_f + 2·C_f·x[II]` au lieu de `ion = 0` pour `f = 0`.
+
+**SC-6 (P1). Bruit STEC adaptatif** : `prniono` fonction de l'élévation (déjà) et de l'activité mesurée (variance des innovations iono), plus grand en début de convergence.
+
+**SC-7 (P1). GLONASS** : IFB code par satellite en état, sinon rester sans GLONASS.
+
+**SC-8 (P2).** Journaliser `qi`, l'âge du 1264 et le nombre de STEC contraints dans le `.stat` ; vérifier avec le CNES le datum Galileo (I/NAV) et la liste des signaux portés par les biais.
+
+### 11.3 Attente réaliste
+
+Non-combiné sans contrainte (état actuel) : même convergence que l'iono-free, 15–30 min à froid. Avec SC-1 + SC-2 : la littérature et les résultats PPP-WIZARD donnent typiquement 5–10 min pour passer sous 10 cm horizontal et 10–20 min pour 5 cm 3D en float, la hauteur restant la composante lente. Avec RT-1 (warm start), la reprise est immédiate en statique et de quelques minutes en cinématique. Le 5 cm 3D « à chaque lancement » sans AR passe donc par la combinaison SC-1, SC-2 et RT-1, puis RT-2/RT-4 pour ne pas reperdre la convergence sur les trous de flux.
+
